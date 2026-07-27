@@ -1,11 +1,11 @@
 import Stripe from "stripe";
 import { revalidatePath } from "next/cache";
-import { env } from "@/lib/env";
 import { getStripe } from "@/lib/stripe";
 import { syncStripeSubscription } from "@/lib/server/stripe-subscription-sync";
 import { planFromPrice } from "@/lib/server/plans";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 async function syncAndLog(event: Stripe.Event, subscription: Stripe.Subscription, clientReferenceId?: string | null) {
   const item = subscription.items.data[0];
@@ -19,18 +19,22 @@ async function syncAndLog(event: Stripe.Event, subscription: Stripe.Subscription
 }
 
 export async function POST(request: Request) {
-  if (!env.STRIPE_WEBHOOK_SECRET) {
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
     return new Response("Webhook secret is not configured.", { status: 500 });
   }
 
+  const rawBody = await request.text();
   const signature = request.headers.get("stripe-signature");
-  if (!signature) return new Response("Missing Stripe signature.", { status: 400 });
+  console.info("[stripe-webhook] verification started", { signatureHeaderPresent: Boolean(signature), bodyLength: rawBody.length });
+  if (!signature) return new Response("Missing Stripe signature", { status: 400 });
 
   let event: Stripe.Event;
   try {
-    event = getStripe().webhooks.constructEvent(await request.text(), signature, env.STRIPE_WEBHOOK_SECRET);
+    event = getStripe().webhooks.constructEvent(rawBody, signature, webhookSecret);
+    console.info("[stripe-webhook] verification succeeded", { verifiedEventType: event.type });
   } catch (error) {
-    console.error("[stripe-webhook] signature verification failed", { name: error instanceof Error ? error.name : "UnknownError", message: error instanceof Error ? error.message : "Invalid Stripe signature." });
+    console.error("[stripe-webhook] verification failed", { signatureHeaderPresent: true, bodyLength: rawBody.length, name: error instanceof Error ? error.name : "UnknownError", message: error instanceof Error ? error.message : "Invalid Stripe signature." });
     return new Response("Invalid Stripe signature.", { status: 400 });
   }
 
