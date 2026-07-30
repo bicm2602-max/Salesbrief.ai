@@ -1,6 +1,6 @@
 export const SITE_NAME = "SalesBrief AI";
-export const SITE_DESCRIPTION = "Enterprise-grade sales briefing automation for modern revenue teams.";
-export const SITE_URL = "https://salesbrief.ai";
+export const SITE_DESCRIPTION = "Generate complete AI-powered sales briefs, company research, buying signals, ICP insights, cold emails, LinkedIn messages, and call preparation from any company website.";
+export const SITE_URL = "https://getsalesbrief.com";
 
 export const APP_ROUTES = {
   home: "/",
