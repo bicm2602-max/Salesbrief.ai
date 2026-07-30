@@ -3,6 +3,7 @@ import { GoogleAnalytics } from "@next/third-parties/google";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppProviders } from "./providers";
+import { MicrosoftClarity } from "@/components/analytics/microsoft-clarity";
 import { env } from "@/lib/env";
 import { siteMetadata } from "@/lib/metadata";
 import "@/styles/tokens.css";
@@ -33,6 +34,7 @@ export default function RootLayout({
       <body className="min-h-full bg-background text-foreground">
         <AppProviders>{children}</AppProviders>
         {env.isProduction && env.NEXT_PUBLIC_GA_MEASUREMENT_ID ? <GoogleAnalytics gaId={env.NEXT_PUBLIC_GA_MEASUREMENT_ID} /> : null}
+        <MicrosoftClarity />
       </body>
     </html>
   );
