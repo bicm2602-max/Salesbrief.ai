@@ -38,12 +38,13 @@ export async function signUpWithEmail(formData: FormData) {
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: {
-      data: {
-        full_name: parsed.data.fullName,
-        company_name: parsed.data.companyName,
-      },
-    },
+   options: {
+  emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/login`,
+  data: {
+    full_name: parsed.data.fullName,
+    company_name: parsed.data.companyName,
+  },
+},
   });
 
   if (authError || !authData.user) {
