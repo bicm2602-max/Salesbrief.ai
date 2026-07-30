@@ -7,6 +7,6 @@ export default function robots(): MetadataRoute.Robots {
       allow: "/",
       disallow: ["/dashboard/", "/settings/", "/history/", "/favorites/", "/api/"],
     },
-    sitemap: "https://getsalesbrief.com/sitemap.xml",
+    sitemap: "https://www.getsalesbrief.com/sitemap.xml",
   };
 }
