@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { env } from "@/lib/env";
 import { z } from "zod";
 
 const signUpSchema = z.object({
@@ -14,6 +15,10 @@ const signUpSchema = z.object({
   companyName: z.string().min(2),
 });
 function safeNext(value: string) { return value.startsWith("/") && !value.startsWith("//") && !value.includes("://") ? value : "/dashboard"; }
+
+function getSiteUrl() {
+  return (env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000").replace(/\/$/, "");
+}
 
 export async function signUpWithEmail(formData: FormData) {
   const next = safeNext(formData.get("next")?.toString() ?? "");
@@ -38,13 +43,13 @@ export async function signUpWithEmail(formData: FormData) {
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
-   options: {
-  emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/login`,
-  data: {
-    full_name: parsed.data.fullName,
-    company_name: parsed.data.companyName,
-  },
-},
+    options: {
+      emailRedirectTo: `${getSiteUrl()}/auth/confirm`,
+      data: {
+        full_name: parsed.data.fullName,
+        company_name: parsed.data.companyName,
+      },
+    },
   });
 
   if (authError || !authData.user) {
