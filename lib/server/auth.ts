@@ -71,7 +71,7 @@ export async function signUpWithEmail(formData: FormData) {
   }
 
   if (!authData.session) {
-    return { success: true, message: "Check your email to confirm your account before signing in." };
+    return { success: true, message: "Check your email to confirm your account before signing in.", email: parsed.data.email };
   }
 
   revalidatePath("/dashboard");

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useForm, type FieldErrors, type Resolver } from "react-hook-form";
 import { z } from "zod";
 import { Eye, EyeOff, LoaderCircle } from "lucide-react";
@@ -9,7 +10,7 @@ import { motion } from "framer-motion";
 
 interface AuthFormProps {
   mode: "login" | "register" | "forgot-password" | "reset-password";
-  onSubmit: (values: Record<string, string>) => Promise<{ success: boolean; error?: string; message?: string } | void>;
+  onSubmit: (values: Record<string, string>) => Promise<{ success: boolean; error?: string; message?: string; email?: string } | void>;
   submitLabel: string;
   nextPath?: string;
 }
@@ -23,10 +24,78 @@ type AuthFormValues = {
 };
 
 export function AuthForm({ mode, onSubmit, submitLabel, nextPath }: AuthFormProps) {
+  const router = useRouter();
   const [showPassword, setShowPassword] = React.useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
   const [status, setStatus] = React.useState<{ type: "success" | "error"; message: string } | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [pendingEmail, setPendingEmail] = React.useState<string | null>(null);
+  const [checkingConfirmation, setCheckingConfirmation] = React.useState(false);
+  const confirmationRequestInFlight = React.useRef(false);
+
+  const checkConfirmation = React.useCallback(async () => {
+    if (!pendingEmail || confirmationRequestInFlight.current) return;
+
+    confirmationRequestInFlight.current = true;
+    setCheckingConfirmation(true);
+
+    try {
+      const response = await fetch("/api/auth/confirmation-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: pendingEmail }),
+        cache: "no-store",
+      });
+      const result: unknown = await response.json().catch(() => null);
+
+      if (response.ok && typeof result === "object" && result !== null && "confirmed" in result && result.confirmed === true) {
+        window.sessionStorage.removeItem("salesbrief-pending-confirmation-email");
+        router.replace("/login?confirmed=true");
+      }
+    } catch {
+      // Network failures are transient; the scheduled check will retry.
+    } finally {
+      confirmationRequestInFlight.current = false;
+      setCheckingConfirmation(false);
+    }
+  }, [pendingEmail, router]);
+
+  React.useEffect(() => {
+    if (mode !== "register") return;
+
+    const storedEmail = window.sessionStorage.getItem("salesbrief-pending-confirmation-email");
+    if (!storedEmail) return;
+
+    const restoreId = window.setTimeout(() => setPendingEmail(storedEmail), 0);
+    return () => window.clearTimeout(restoreId);
+  }, [mode]);
+
+  React.useEffect(() => {
+    if (!pendingEmail) return;
+
+    let stopped = false;
+    const check = () => {
+      if (!stopped && !document.hidden) void checkConfirmation();
+    };
+    const intervalId = window.setInterval(check, 4_000);
+    const timeoutId = window.setTimeout(() => {
+      stopped = true;
+      window.clearInterval(intervalId);
+    }, 10 * 60_000);
+    const onVisibilityChange = () => {
+      if (!document.hidden) check();
+    };
+
+    check();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [checkConfirmation, pendingEmail]);
 
   const authSchema = React.useMemo(() => {
     const baseSchema = z.object({
@@ -87,6 +156,22 @@ export function AuthForm({ mode, onSubmit, submitLabel, nextPath }: AuthFormProp
     },
   });
 
+  if (mode === "register" && pendingEmail) {
+    return (
+      <div className="space-y-5">
+        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-300">
+          <p className="font-medium text-emerald-200">Check your email to confirm your account.</p>
+          <p className="mt-1 text-emerald-300/80">We sent a confirmation link to {pendingEmail}.</p>
+        </div>
+        <button type="button" onClick={() => void checkConfirmation()} disabled={checkingConfirmation} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 disabled:opacity-70">
+          {checkingConfirmation ? <LoaderCircle className="size-4 animate-spin" /> : null}
+          I&apos;ve confirmed my email
+        </button>
+        <Link href="/login" className="block text-center text-sm text-slate-400 transition hover:text-slate-100">Go to sign in</Link>
+      </div>
+    );
+  }
+
   return (
     <form
       className="space-y-5"
@@ -97,6 +182,9 @@ export function AuthForm({ mode, onSubmit, submitLabel, nextPath }: AuthFormProp
           const response = await onSubmit({ ...values, next: nextPath ?? "" });
           if (response?.success === false && response.error) {
             setStatus({ type: "error", message: response.error });
+          } else if (mode === "register" && response?.success && response.email) {
+            window.sessionStorage.setItem("salesbrief-pending-confirmation-email", response.email);
+            setPendingEmail(response.email);
           } else if (response?.message) {
             setStatus({ type: "success", message: response.message });
           }
