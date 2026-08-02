@@ -11,8 +11,11 @@ const websiteContentSchema = z.object({
   homePage: z.string(),
 });
 
-const FETCH_TIMEOUT_MS = 10_000;
-const MAX_RESPONSE_BYTES = 1_000_000;
+const FETCH_TIMEOUT_MS = 20_000;
+// Keep a firm resource bound, but never fail an analysis just because a public
+// document is large. The useful, semantic content is extracted from the
+// available portion of the stream below.
+const MAX_DOWNLOAD_BYTES = 5_000_000;
 const MAX_REDIRECTS = 5;
 const FETCH_HEADERS = {
   "User-Agent": "Mozilla/5.0 (compatible; SalesBriefAI/1.0; +https://salesbrief.ai)",
@@ -38,26 +41,29 @@ export async function fetchWebsiteContent(website: string) {
   }
 
   const contentLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
-    console.warn("[website-fetch] response too large", { url: response.url, contentLength, maxBytes: MAX_RESPONSE_BYTES });
-    throw new Error("The website response is too large to analyze.");
+  if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
+    console.info("[website-fetch] large response announced", { url: response.url, contentLength, downloadLimit: MAX_DOWNLOAD_BYTES });
   }
 
-  const html = await readLimitedResponse(response);
-  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-  const metaDescriptionMatch = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i);
+  const { html, bytesRead, truncated } = await readLimitedResponse(response);
+  const semanticHtml = removeNonContentBlocks(html);
+  const contentHtml = removePageChrome(semanticHtml);
+  const titleMatch = semanticHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const metaDescriptionMatch = semanticHtml.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) || semanticHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i);
 
-  const headingMatches = Array.from(html.matchAll(/<h([1-6])[^>]*>(.*?)<\/h\1>/gi)).map((match) => stripHtml(match[2]));
-  const paragraphMatches = Array.from(html.matchAll(/<p[^>]*>(.*?)<\/p>/gi)).map((match) => stripHtml(match[1]));
-  const linkMatches = Array.from(html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi)).map((match) => match[1]);
+  const headingMatches = Array.from(contentHtml.matchAll(/<h([1-6])[^>]*>(.*?)<\/h\1>/gi)).map((match) => stripHtml(match[2]));
+  const paragraphMatches = Array.from(contentHtml.matchAll(/<p[^>]*>(.*?)<\/p>/gi)).map((match) => stripHtml(match[1]));
+  const linkMatches = Array.from(contentHtml.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi)).map((match) => match[1]);
+  const headings = uniqueText(headingMatches, 24, 300);
+  const paragraphs = uniqueText(paragraphMatches, 24, 1_200);
 
   const content = {
-    title: titleMatch?.[1]?.trim(),
-    metaDescription: metaDescriptionMatch?.[1]?.trim(),
-    headings: headingMatches.filter(Boolean),
-    paragraphs: paragraphMatches.filter(Boolean).slice(0, 8),
+    title: titleMatch ? stripHtml(titleMatch[1]).slice(0, 300) : undefined,
+    metaDescription: metaDescriptionMatch ? stripHtml(metaDescriptionMatch[1]).slice(0, 500) : undefined,
+    headings,
+    paragraphs,
     links: linkMatches.filter(Boolean).slice(0, 12),
-    homePage: stripHtml(html).slice(0, 12000),
+    homePage: buildPrioritizedText(contentHtml, headings, paragraphs),
   };
 
   console.info("[website-fetch] content extracted", {
@@ -66,6 +72,8 @@ export async function fetchWebsiteContent(website: string) {
     paragraphCount: content.paragraphs.length,
     linkCount: content.links.length,
     textLength: content.homePage.length,
+    bytesRead,
+    truncated,
   });
 
   return websiteContentSchema.parse(content);
@@ -183,18 +191,27 @@ async function readLimitedResponse(response: Response) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      size += value.byteLength;
-      if (size > MAX_RESPONSE_BYTES) {
-        console.warn("[website-fetch] streamed response too large", { maxBytes: MAX_RESPONSE_BYTES });
+      const remainingBytes = MAX_DOWNLOAD_BYTES - size;
+      if (value.byteLength > remainingBytes) {
+        if (remainingBytes > 0) {
+          chunks.push(value.slice(0, remainingBytes));
+          size += remainingBytes;
+        }
+        console.info("[website-fetch] streamed response truncated", { downloadLimit: MAX_DOWNLOAD_BYTES });
         await reader.cancel();
-        throw new Error("The website response is too large to analyze.");
+        return { html: decodeChunks(chunks, size), bytesRead: size, truncated: true };
       }
+      size += value.byteLength;
       chunks.push(value);
     }
   } finally {
     reader.releaseLock();
   }
 
+  return { html: decodeChunks(chunks, size), bytesRead: size, truncated: false };
+}
+
+function decodeChunks(chunks: Uint8Array[], size: number) {
   const bytes = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {
@@ -204,10 +221,45 @@ async function readLimitedResponse(response: Response) {
   return new TextDecoder().decode(bytes);
 }
 
+function uniqueText(values: string[], maxItems: number, maxItemChars: number) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized.slice(0, maxItemChars));
+    if (result.length === maxItems) break;
+  }
+
+  return result;
+}
+
+function removeNonContentBlocks(value: string) {
+  return value
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|noscript|svg|template|iframe)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    // A stream may end inside a script or style tag after reaching the safe
+    // download bound. Discard that unfinished block rather than treating code
+    // as website copy.
+    .replace(/<(script|style|noscript|svg|template|iframe)\b[^>]*>[\s\S]*$/i, " ");
+}
+
+function removePageChrome(value: string) {
+  return value.replace(/<(nav|footer|aside)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ");
+}
+
+function buildPrioritizedText(contentHtml: string, headings: string[], paragraphs: string[]) {
+  const semanticText = [...headings, ...paragraphs].join("\n");
+  const remainingText = stripHtml(contentHtml);
+  return `${semanticText}\n${remainingText}`.trim().slice(0, 12_000);
+}
+
 function stripHtml(value: string) {
   return value
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<(script|style|noscript|svg|template|iframe)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();

@@ -117,22 +117,31 @@ function serializePromptWebsiteContent(content: WebsiteContent) {
   const compactContent = {
     title: content.title?.slice(0, 300),
     metaDescription: content.metaDescription?.slice(0, 500),
-    headings: content.headings.slice(0, 12).map((heading) => heading.slice(0, 300)),
-    paragraphs: content.paragraphs.slice(0, 6).map((paragraph) => paragraph.slice(0, 1_200)),
+    headings: content.headings.slice(0, 10).map((heading) => heading.slice(0, 240)),
+    paragraphs: content.paragraphs.slice(0, 8).map((paragraph) => paragraph.slice(0, 900)),
     links: [],
     homePage: "",
   };
   const availableHomePageChars = Math.max(0, MAX_PROMPT_WEBSITE_CONTENT_CHARS - JSON.stringify(compactContent).length);
-  const serialized = JSON.stringify({
+  let homePage = content.homePage.slice(0, availableHomePageChars);
+  let serialized = JSON.stringify({
     ...compactContent,
-    homePage: content.homePage.slice(0, availableHomePageChars),
+    homePage,
   });
+
+  // JSON escaping can add characters beyond the source-text length. Trim the
+  // final field by the measured excess to keep the model input bounded exactly.
+  while (serialized.length > MAX_PROMPT_WEBSITE_CONTENT_CHARS && homePage.length > 0) {
+    homePage = homePage.slice(0, Math.max(0, homePage.length - (serialized.length - MAX_PROMPT_WEBSITE_CONTENT_CHARS)));
+    serialized = JSON.stringify({ ...compactContent, homePage });
+  }
 
   console.info("[analysis] prompt website content limited", {
     stage: "prompt preparation",
     beforeLength: JSON.stringify(content).length,
     afterLength: serialized.length,
     maxLength: MAX_PROMPT_WEBSITE_CONTENT_CHARS,
+    estimatedTokens: Math.ceil(serialized.length / 4),
   });
 
   return serialized;
