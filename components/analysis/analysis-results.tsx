@@ -170,6 +170,10 @@ export function AnalysisResults({ result, analysisId, isFavorite }: AnalysisResu
       <div className="grid gap-6 lg:grid-cols-2">
         <OutreachCard title="Cold email" content={result.email} copyText="Email" />
         <OutreachCard title="LinkedIn message" content={result.linkedin} copyText="Social" />
+        {result.outreachVariants ? <>
+          <OutreachCard title="Consultative email" content={result.outreachVariants.emailConsultative} copyText="Consultative email" />
+          <OutreachCard title="Conversational LinkedIn message" content={result.outreachVariants.linkedinConversational} copyText="Conversational social" />
+        </> : null}
         <OutreachCard title="Cold call script" content={result.coldCall} copyText="Call" />
         <OutreachCard title="Follow-up email" content={result.followUp} copyText="Follow-up" />
       </div>

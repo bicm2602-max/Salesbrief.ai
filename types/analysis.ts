@@ -47,6 +47,13 @@ export interface LeadScoreInsight {
   breakdown: LeadScoreBreakdown;
 }
 
+export interface OutreachVariants {
+  emailShort: string;
+  emailConsultative: string;
+  linkedinShort: string;
+  linkedinConversational: string;
+}
+
 export interface AnalysisReport {
   companyName: string;
   industry: string;
@@ -69,6 +76,7 @@ export interface AnalysisReport {
   recommendedOffer: string;
   email: string;
   linkedin: string;
+  outreachVariants?: OutreachVariants;
   coldCall: string;
   followUp: string;
   objections: string[];

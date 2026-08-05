@@ -18,6 +18,13 @@ const objectionSchema = z.union([
   z.object({ objection: z.string() }),
 ]);
 
+const outreachVariantsSchema = z.object({
+  emailShort: z.string().min(1),
+  emailConsultative: z.string().min(1),
+  linkedinShort: z.string().min(1),
+  linkedinConversational: z.string().min(1),
+});
+
 const analysisSchema = z.object({
   companyName: z.string().min(1),
   industry: z.string().min(1),
@@ -34,6 +41,7 @@ const analysisSchema = z.object({
   recommendedOffer: z.string().min(1),
   email: z.string().min(1),
   linkedin: z.string().min(1),
+  outreachVariants: outreachVariantsSchema,
   coldCall: z.string().min(1),
   followUp: z.string().min(1),
   objections: z.array(objectionSchema).transform((objections) =>
@@ -260,7 +268,13 @@ export async function generateSalesBrief(website: string): Promise<AnalysisResul
         "OpenAI response did not match the analysis schema.",
       );
     }
-    const result = validation.data;
+    const result = {
+      ...validation.data,
+      // Keep the established fields as the concise variants used by existing
+      // result cards and integrations, without depending on model duplication.
+      email: validation.data.outreachVariants.emailShort,
+      linkedin: validation.data.outreachVariants.linkedinShort,
+    };
     const enriched = enrichAnalysisReport(
       {
         ...result,
