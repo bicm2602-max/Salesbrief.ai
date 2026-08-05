@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
 import { Container } from "@/components/ui/container";
 import { SectionHeading } from "@/components/landing/section-heading";
-import { createCheckoutSessionForPlan, getPricingSubscriptionState } from "@/lib/server/billing";
+import { createCheckoutSessionForPlan } from "@/lib/server/billing";
 
 const plans = [
   { id: "starter", name: "Starter", price: "$29", description: "For freelancers and solo operators building momentum.", features: ["10 briefs per month", "Company analysis", "Email and LinkedIn drafts", "Ask SalesBrief: up to 10 questions per brief"], featured: false },
@@ -13,10 +13,10 @@ const plans = [
   { id: "business", name: "Business", price: "$199", description: "For scaling teams that need collaboration and workflow depth.", features: ["Team seats", "Shared workspaces", "API access", "Priority support"], featured: false },
 ] as const;
 
-export function PricingPreview() {
-  const router = useRouter(); const searchParams = useSearchParams(); const selected = searchParams.get("plan"); const selectedPlan = selected === "starter" || selected === "pro" ? selected : null; const [loading, setLoading] = React.useState<string | null>(null); const [error, setError] = React.useState<string | null>(null); const [subscription, setSubscription] = React.useState<{ authenticated: boolean; plan: "free" | "starter" | "pro" | "business" } | null>(null);
-  const refreshSubscription = React.useCallback(() => { void getPricingSubscriptionState().then(setSubscription); }, []);
-  React.useEffect(() => { refreshSubscription(); }, [refreshSubscription]);
+type PricingSubscription = { authenticated: boolean; plan: "free" | "starter" | "pro" | "business" };
+
+export function PricingPreview({ initialSubscription }: { initialSubscription: PricingSubscription }) {
+  const router = useRouter(); const searchParams = useSearchParams(); const selected = searchParams.get("plan"); const selectedPlan = selected === "starter" || selected === "pro" ? selected : null; const [loading, setLoading] = React.useState<string | null>(null); const [error, setError] = React.useState<string | null>(null); const [subscription] = React.useState<PricingSubscription>(initialSubscription);
   async function choose(plan: "starter" | "pro" | "business") {
     if (loading) return; setLoading(plan); setError(null);
     try {

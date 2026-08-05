@@ -10,11 +10,25 @@ import { FAQ } from "@/components/landing/faq";
 import { CTA } from "@/components/landing/cta";
 import { Footer } from "@/components/landing/footer";
 import { DemoProvider } from "@/components/marketing/demo-provider";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
-export default function HomePage() {
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: profile } = user
+    ? await supabase.from("profiles").select("plan, stripe_subscription_status").eq("id", user.id).maybeSingle()
+    : { data: null };
+  const isActive = profile?.stripe_subscription_status === "active" || profile?.stripe_subscription_status === "trialing";
+  const plan = isActive && (profile?.plan === "starter" || profile?.plan === "pro" || profile?.plan === "business")
+    ? profile.plan
+    : "free";
+  const authState = { authenticated: Boolean(user), plan };
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.15),transparent_35%),#020617] text-slate-100">
-      <Navbar />
+      <Navbar user={user ? { email: user.email ?? "" } : null} />
       <DemoProvider><main>
         <Hero />
         <Problem />
@@ -22,7 +36,7 @@ export default function HomePage() {
         <Features />
         <Demo />
         <HowItWorks />
-        <PricingPreview />
+        <PricingPreview initialSubscription={authState} />
         <FAQ />
         <CTA />
       </main></DemoProvider>
