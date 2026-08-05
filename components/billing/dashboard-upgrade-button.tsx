@@ -20,12 +20,12 @@ export function DashboardUpgradeButton({ compact = false }: { compact?: boolean 
     void getPricingSubscriptionState().then((state) => setPlan(state.plan));
   }, []);
 
-  async function upgradeToPro() {
+  async function openPlan(planToOpen: "starter" | "pro") {
     if (loading) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await createCheckoutSessionForPlan("pro");
+      const result = await createCheckoutSessionForPlan(planToOpen);
       if (result.ok && result.action === "checkout" && result.url) {
         window.location.assign(result.url);
         return;
@@ -56,8 +56,8 @@ export function DashboardUpgradeButton({ compact = false }: { compact?: boolean 
   }
 
   if (plan === "starter") {
-    return <div><button type="button" onClick={upgradeToPro} disabled={loading} className={className}>{loading ? "Updating subscription..." : "Upgrade to Pro"}</button>{error ? <p className="mt-2 text-xs text-rose-300" role="alert">{error}</p> : null}</div>;
+    return <div><button type="button" onClick={() => void openPlan("pro")} disabled={loading} className={className}>{loading ? "Updating subscription..." : "Upgrade to Pro"}</button>{error ? <p className="mt-2 text-xs text-rose-300" role="alert">{error}</p> : null}</div>;
   }
 
-  return <button type="button" disabled={plan === null} onClick={() => router.push("/#pricing")} className={className}>{plan === null ? "Loading..." : "Upgrade"}</button>;
+  return <div><button type="button" disabled={plan === null || loading} onClick={() => void openPlan("starter")} className={className}>{plan === null ? "Loading..." : loading ? "Opening checkout..." : "Upgrade"}</button>{error ? <p className="mt-2 text-xs text-rose-300" role="alert">{error}</p> : null}</div>;
 }

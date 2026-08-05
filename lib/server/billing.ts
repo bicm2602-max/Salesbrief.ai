@@ -65,7 +65,7 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
       return { ok: true, action: "updated", plan } as const;
     }
     if (plan === "business") return { ok: false, code: "INVALID_PLAN", message: "Business plans are not available yet." } as const;
-    const session = await getStripe().checkout.sessions.create({ mode: "subscription", line_items: [{ price: selectedPlan.priceId, quantity: 1 }], success_url: `${siteUrl}/dashboard?checkout=success`, cancel_url: `${siteUrl}/#pricing`, client_reference_id: user.id, metadata: { user_id: user.id, plan }, subscription_data: { metadata: { user_id: user.id, plan } }, ...(profile?.stripe_customer_id ? { customer: profile.stripe_customer_id } : { customer_email: user.email }) });
+    const session = await getStripe().checkout.sessions.create({ mode: "subscription", line_items: [{ price: selectedPlan.priceId, quantity: 1 }], success_url: `${siteUrl}/dashboard?checkout=success`, cancel_url: `${siteUrl}/dashboard?checkout=canceled`, client_reference_id: user.id, metadata: { user_id: user.id, plan }, subscription_data: { metadata: { user_id: user.id, plan } }, ...(profile?.stripe_customer_id ? { customer: profile.stripe_customer_id } : { customer_email: user.email }) });
     if (!session.url) return { ok: false, code: "STRIPE_ERROR", message: "Stripe Checkout is temporarily unavailable." } as const;
     return { ok: true, action: "checkout", url: session.url } as const;
   } catch (error) {
