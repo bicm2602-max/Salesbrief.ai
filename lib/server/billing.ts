@@ -59,7 +59,9 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
         proration_behavior: "always_invoice",
         metadata: { ...existing.metadata, user_id: user.id, plan },
       });
-      await syncStripeSubscription(updated, { verifiedUserId: user.id });
+      // The verified Stripe webhook is the billing source of truth for Supabase.
+      // Do not persist a client-triggered plan change before that webhook arrives.
+      console.info("[billing] subscription updated in Stripe", { userId: user.id, customerId, subscriptionId: updated.id, selectedPlan: plan });
       revalidatePath("/");
       revalidatePath("/dashboard");
       return { ok: true, action: "updated", plan } as const;
