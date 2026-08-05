@@ -17,6 +17,7 @@ const FETCH_TIMEOUT_MS = 20_000;
 // available portion of the stream below.
 const MAX_DOWNLOAD_BYTES = 5_000_000;
 const MAX_REDIRECTS = 5;
+const MAX_FALLBACK_PAGES = 2;
 const FETCH_HEADERS = {
   "User-Agent": "Mozilla/5.0 (compatible; SalesBriefAI/1.0; +https://salesbrief.ai)",
   Accept: "text/html,application/xhtml+xml",
@@ -46,25 +47,25 @@ export async function fetchWebsiteContent(website: string) {
   }
 
   const { html, bytesRead, truncated } = await readLimitedResponse(response);
-  const semanticHtml = removeNonContentBlocks(html);
-  const contentHtml = removePageChrome(semanticHtml);
-  const titleMatch = semanticHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
-  const metaDescriptionMatch = semanticHtml.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) || semanticHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i);
+  const extracted = extractWebsiteContent(html);
+  let content = extracted.content;
 
-  const headingMatches = Array.from(contentHtml.matchAll(/<h([1-6])[^>]*>(.*?)<\/h\1>/gi)).map((match) => stripHtml(match[2]));
-  const paragraphMatches = Array.from(contentHtml.matchAll(/<p[^>]*>(.*?)<\/p>/gi)).map((match) => stripHtml(match[1]));
-  const linkMatches = Array.from(contentHtml.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi)).map((match) => match[1]);
-  const headings = uniqueText(headingMatches, 24, 300);
-  const paragraphs = uniqueText(paragraphMatches, 24, 1_200);
+  if (needsKeyPageFallback(content)) {
+    const fallbackContent = await fetchKeyPageContent(response.url, extracted.hrefs);
+    if (fallbackContent) {
+      content = mergeWebsiteContent(content, fallbackContent);
+      console.info("[website-fetch] key-page fallback merged", {
+        url: response.url,
+        headingCount: content.headings.length,
+        paragraphCount: content.paragraphs.length,
+        textLength: content.homePage.length,
+      });
+    }
+  }
 
-  const content = {
-    title: titleMatch ? stripHtml(titleMatch[1]).slice(0, 300) : undefined,
-    metaDescription: metaDescriptionMatch ? stripHtml(metaDescriptionMatch[1]).slice(0, 500) : undefined,
-    headings,
-    paragraphs,
-    links: linkMatches.filter(Boolean).slice(0, 12),
-    homePage: buildPrioritizedText(contentHtml, headings, paragraphs),
-  };
+  if (content.homePage.length < 100) {
+    throw new Error("The website did not contain enough readable content to analyze.");
+  }
 
   console.info("[website-fetch] content extracted", {
     titlePresent: Boolean(content.title),
@@ -77,6 +78,110 @@ export async function fetchWebsiteContent(website: string) {
   });
 
   return websiteContentSchema.parse(content);
+}
+
+function extractWebsiteContent(html: string) {
+  const semanticHtml = removeNonContentBlocks(html);
+  const contentHtml = removePageChrome(semanticHtml);
+  const titleMatch = semanticHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const metaDescriptionMatch = semanticHtml.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) || semanticHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i);
+
+  const headingMatches = Array.from(contentHtml.matchAll(/<h([1-6])[^>]*>(.*?)<\/h\1>/gi)).map((match) => stripHtml(match[2]));
+  const paragraphMatches = Array.from(contentHtml.matchAll(/<p[^>]*>(.*?)<\/p>/gi)).map((match) => stripHtml(match[1]));
+  const linkMatches = Array.from(contentHtml.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi)).map((match) => match[1]);
+  const headings = uniqueText(headingMatches, 24, 300);
+  const paragraphs = uniqueText(paragraphMatches, 24, 1_200);
+
+  return {
+    hrefs: linkMatches.filter(Boolean).slice(0, 200),
+    content: {
+      title: titleMatch ? stripHtml(titleMatch[1]).slice(0, 300) : undefined,
+      metaDescription: metaDescriptionMatch ? stripHtml(metaDescriptionMatch[1]).slice(0, 500) : undefined,
+      headings,
+      paragraphs,
+      links: linkMatches.filter(Boolean).slice(0, 12),
+      homePage: buildPrioritizedText(contentHtml, headings, paragraphs),
+    },
+  };
+}
+
+function needsKeyPageFallback(content: z.infer<typeof websiteContentSchema>) {
+  return content.homePage.length < 500 || content.paragraphs.length < 2;
+}
+
+async function fetchKeyPageContent(baseUrl: string, hrefs: string[]) {
+  const candidates = getKeyPageUrls(baseUrl, hrefs);
+
+  for (const candidate of candidates) {
+    try {
+      const safety = await getPublicWebsiteUrlSafety(candidate);
+      if (!safety.allowed) continue;
+
+      const response = await fetchWithRedirects(candidate);
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!response.ok || (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml"))) continue;
+
+      const { html, bytesRead, truncated } = await readLimitedResponse(response);
+      const fallback = extractWebsiteContent(html).content;
+      if (fallback.homePage.length < 100) continue;
+
+      console.info("[website-fetch] key-page fallback extracted", {
+        url: response.url,
+        bytesRead,
+        truncated,
+        headingCount: fallback.headings.length,
+        paragraphCount: fallback.paragraphs.length,
+      });
+      return fallback;
+    } catch (error) {
+      console.info("[website-fetch] key-page fallback unavailable", {
+        url: candidate,
+        name: error instanceof Error ? error.name : "UnknownError",
+        message: error instanceof Error ? error.message : "Unknown error.",
+      });
+    }
+  }
+
+  return null;
+}
+
+function getKeyPageUrls(baseUrl: string, hrefs: string[]) {
+  const base = new URL(baseUrl);
+  const seen = new Set<string>();
+  const candidates: { url: string; score: number }[] = [];
+
+  for (const href of hrefs) {
+    try {
+      const url = new URL(href, base);
+      const path = url.pathname.toLowerCase();
+      if (url.origin !== base.origin || url.hash || path === base.pathname || /\.(?:pdf|zip|png|jpe?g|gif|webp|svg|css|js)$/i.test(path)) continue;
+
+      const score = /(?:about|mission|services|solutions|product|what-we-do|our-work|programs|who-we-are)/.test(path) ? 2 : 1;
+      const normalized = `${url.origin}${url.pathname}`;
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        candidates.push({ url: normalized, score });
+      }
+    } catch {
+      // Ignore malformed links from third-party HTML.
+    }
+  }
+
+  return candidates
+    .sort((left, right) => right.score - left.score)
+    .slice(0, MAX_FALLBACK_PAGES)
+    .map(({ url }) => url);
+}
+
+function mergeWebsiteContent(primary: z.infer<typeof websiteContentSchema>, fallback: z.infer<typeof websiteContentSchema>) {
+  return {
+    title: primary.title ?? fallback.title,
+    metaDescription: primary.metaDescription ?? fallback.metaDescription,
+    headings: uniqueText([...primary.headings, ...fallback.headings], 24, 300),
+    paragraphs: uniqueText([...primary.paragraphs, ...fallback.paragraphs], 24, 1_200),
+    links: uniqueText([...primary.links, ...fallback.links], 12, 500),
+    homePage: [primary.homePage, fallback.homePage].filter(Boolean).join("\n").slice(0, 12_000),
+  };
 }
 
 async function fetchWithRedirects(initialUrl: string) {
