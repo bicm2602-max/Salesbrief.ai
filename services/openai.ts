@@ -1,5 +1,7 @@
 import OpenAI from "openai";
+import { z } from "zod";
 import { AnalysisPipelineError } from "@/services/analysis-errors";
+import type { AssistantMessage } from "@/services/analysis-assistant";
 
 function getClient() {
   if (!process.env.OPENAI_API_KEY) {
@@ -42,6 +44,41 @@ export async function generateAnalysisJson(prompt: string) {
     const details = getOpenAiErrorDetails(error);
     console.error("[analysis] OpenAI request failed", { stage: "openai request", ...details, elapsedMs: Date.now() - startedAt, timeoutReached: details.name.includes("Timeout") });
     throw new AnalysisPipelineError("openai request", getOpenAiUserMessage(details), details.message);
+  }
+}
+
+const assistantAnswerSchema = z.object({
+  answer: z.string().trim().min(1).max(1_200),
+  verified: z.boolean(),
+});
+
+export async function generateCompanyAssistantAnswer(context: string, history: AssistantMessage[], question: string) {
+  const startedAt = Date.now();
+  console.info("[analysis-assistant] OpenAI request started", { contextLength: context.length, historyCount: history.length, questionLength: question.length });
+
+  try {
+    const response = await getClient().responses.create({
+      model: "gpt-5",
+      input: [
+        {
+          role: "system",
+          content: "You answer only questions about the analyzed company using the supplied structured context and conversation. Do not use outside knowledge. Never invent facts. Return JSON only: { answer: string, verified: boolean }. Set verified to false and use the exact answer 'I couldn’t verify that from the available company data.' whenever the context does not support the answer. Keep verified answers concise, factual, and commercially useful.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({ companyContext: context, conversation: history, question }),
+        },
+      ],
+    });
+    const parsed = assistantAnswerSchema.safeParse(JSON.parse(response.output_text ?? ""));
+    if (!parsed.success) throw new Error("Assistant response did not match the expected schema.");
+
+    console.info("[analysis-assistant] OpenAI response received", { verified: parsed.data.verified, answerLength: parsed.data.answer.length, elapsedMs: Date.now() - startedAt });
+    return parsed.data;
+  } catch (error) {
+    const details = getOpenAiErrorDetails(error);
+    console.error("[analysis-assistant] OpenAI request failed", { ...details, elapsedMs: Date.now() - startedAt });
+    throw new AnalysisPipelineError("company assistant", "The company assistant could not answer right now. Please try again.", details.message);
   }
 }
 

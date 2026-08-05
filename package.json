@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:prompts": "node --test tests/company-analysis-prompt.test.mjs"
+    "test:prompts": "node --test tests/company-analysis-prompt.test.mjs tests/analysis-assistant.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

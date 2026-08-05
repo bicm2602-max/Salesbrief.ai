@@ -24,6 +24,7 @@ export default function NewAnalysisPage() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<Awaited<ReturnType<typeof analyzeWebsiteAction>>["result"] | null>(null);
+  const [analysisId, setAnalysisId] = React.useState<string | null>(null);
   const [recentAnalyses, setRecentAnalyses] = React.useState<{ id: string; website: string }[]>([]);
   const [rerunningId, setRerunningId] = React.useState<string | null>(null);
   const [recentError, setRecentError] = React.useState<string | null>(null);
@@ -59,6 +60,7 @@ export default function NewAnalysisPage() {
     const response = await analyzeWebsiteAction(parsed.data);
     if (response.success && response.result) {
       setResult(response.result);
+      setAnalysisId(response.analysisId);
     } else {
       const failureMessage = response.error ?? "Analysis failed.";
       setError(failureMessage);
@@ -154,7 +156,7 @@ export default function NewAnalysisPage() {
           </div>
         </section>
       ) : (
-        <AnalysisResults result={result} />
+        <AnalysisResults result={result} analysisId={analysisId ?? undefined} />
       )}
     </div>
   );

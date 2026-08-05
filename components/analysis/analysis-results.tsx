@@ -8,6 +8,7 @@ import { OutreachCard } from "@/components/analysis/outreach-card";
 import { ScoreCard } from "@/components/analysis/score-card";
 import { SignalCard } from "@/components/analysis/signal-card";
 import { FavoriteButton } from "@/components/analysis/favorite-button";
+import { AskSalesBrief } from "@/components/analysis/ask-salesbrief";
 
 interface AnalysisResultsProps {
   result: AnalysisResult;
@@ -161,6 +162,8 @@ export function AnalysisResults({ result, analysisId, isFavorite }: AnalysisResu
           </div>
         </div>
       </div>
+
+      {analysisId ? <AskSalesBrief analysisId={analysisId} /> : null}
 
       <div className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-7 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
         <h3 className="text-xl font-semibold text-slate-50">Summary</h3>
