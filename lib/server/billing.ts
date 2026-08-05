@@ -99,6 +99,7 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
       const existing = await stripe.subscriptions.retrieve(subscriptionId);
       const customerId = typeof existing.customer === "string" ? existing.customer : existing.customer.id;
       if (profile?.stripe_customer_id && customerId !== profile.stripe_customer_id) return { ok: false, code: "EXISTING_SUBSCRIPTION", message: "Your active subscription could not be verified. Please use Manage subscription." } as const;
+      if (existing.status !== "active" && existing.status !== "trialing") return { ok: false, code: "EXISTING_SUBSCRIPTION", message: "Your active subscription could not be verified. Please use Manage subscription." } as const;
       const item = existing.items.data[0];
       if (!item) return { ok: false, code: "STRIPE_ERROR", message: "Your active subscription could not be updated." } as const;
 

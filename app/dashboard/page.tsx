@@ -7,6 +7,7 @@ import { CheckoutStatus } from "@/components/dashboard/checkout-status";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createCustomerPortalSession } from "@/lib/server/billing";
 import { getCurrentSubscriptionState } from "@/lib/server/subscription-state";
+import { DashboardUpgradeButton } from "@/components/billing/dashboard-upgrade-button";
 import type { AnalysisResult } from "@/types/analysis";
 
 function formatDate(value: string | null | undefined) {
@@ -72,7 +73,7 @@ export default async function DashboardHomePage({ searchParams }: { searchParams
           <ul className="mt-5 space-y-2 text-sm leading-7 text-slate-300">{planCopy.rules.map((rule) => <li key={rule}>• {rule}</li>)}{renewalDate && activePlan !== "free" ? <li>• Renews on {renewalDate}</li> : null}</ul>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href="/dashboard/new-analysis" className="rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-500">Analyze website</Link>
-            {activePlan === "free" ? <Link href="/#pricing" className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-white/10">Upgrade your plan</Link> : <form action={createCustomerPortalSession}><button type="submit" className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-white/10">Manage subscription</button></form>}
+            {activePlan === "free" ? <DashboardUpgradeButton /> : <form action={createCustomerPortalSession}><button type="submit" className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-white/10">Manage subscription</button></form>}
           </div>
         </div>
         <div className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">

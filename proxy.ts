@@ -4,8 +4,12 @@ import { env } from "@/lib/env";
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
+  const cookieOptions = env.isProduction && env.NEXT_PUBLIC_SITE_URL === "https://www.getsalesbrief.com"
+    ? { domain: ".getsalesbrief.com", path: "/", sameSite: "lax" as const, secure: true }
+    : undefined;
 
   const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+    cookieOptions,
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -13,7 +17,7 @@ export async function proxy(request: NextRequest) {
       setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request: { headers: request.headers } });
-        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, { ...options, ...cookieOptions }));
       },
     },
   });

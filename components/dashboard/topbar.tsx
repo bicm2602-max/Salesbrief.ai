@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signOut } from "@/lib/server/auth";
 import { getDashboardIdentity, searchAnalyses } from "@/app/dashboard/actions";
+import { DashboardUpgradeButton } from "@/components/billing/dashboard-upgrade-button";
 
 export function Topbar() {
   const router = useRouter();
@@ -47,7 +48,7 @@ export function Topbar() {
           Sign out
         </button>
       </form>
-      <button type="button" onClick={() => router.push("/#pricing")} className="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500">Upgrade</button>
+      <DashboardUpgradeButton />
     </div>
   );
 }

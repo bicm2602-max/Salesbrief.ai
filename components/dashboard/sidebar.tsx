@@ -4,10 +4,10 @@ import Link from "next/link";
 import * as React from "react";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarChart3, Compass, FileText, Heart, HelpCircle, LayoutGrid, PanelsTopLeft, Settings, Sparkles, WalletCards } from "lucide-react";
+import { FileText, Heart, HelpCircle, LayoutGrid, PanelsTopLeft, Settings, Sparkles, WalletCards } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSubscriptionDisplay } from "@/app/dashboard/actions";
-import { createCustomerPortalSession } from "@/lib/server/billing";
+import { DashboardUpgradeButton } from "@/components/billing/dashboard-upgrade-button";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -76,7 +76,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
         {!collapsed ? <>
           <p className="mt-3 text-sm leading-7 text-slate-400">{billing?.detail ?? "Loading billing details…"}</p>
           {billing?.plan === "starter" && billing.remaining !== null ? <p className="mt-1 text-xs text-slate-500">{billing.remaining} analyses remaining</p> : null}
-          {billing?.canManage ? <><form action={createCustomerPortalSession} className="mt-3"><button type="submit" className="text-sm text-blue-300 transition hover:text-blue-200">Manage subscription</button></form>{billing.plan === "starter" ? <Link href="/#pricing" className="mt-2 inline-block text-xs text-slate-400 transition hover:text-slate-200">Upgrade to Pro</Link> : null}</> : <Link href="/#pricing" className="mt-3 inline-block text-sm text-blue-300 transition hover:text-blue-200">Upgrade</Link>}
+          {billing ? <div className="mt-3"><DashboardUpgradeButton compact /></div> : null}
         </> : null}
       </div>
 

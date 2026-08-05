@@ -4,8 +4,12 @@ import { env } from "@/lib/env";
 
 export async function createServerSupabaseClient() {
   const cookieStore = await cookies();
+  const cookieOptions = env.isProduction && env.NEXT_PUBLIC_SITE_URL === "https://www.getsalesbrief.com"
+    ? { domain: ".getsalesbrief.com", path: "/", sameSite: "lax" as const, secure: true }
+    : undefined;
 
   return createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+    cookieOptions,
     cookies: {
       getAll() {
         return cookieStore.getAll();
