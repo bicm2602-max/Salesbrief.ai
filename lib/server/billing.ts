@@ -28,16 +28,32 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
     const supabase = await createServerSupabaseClient(); const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { ok: false, code: "AUTH_REQUIRED", message: "Please sign in before choosing a plan." } as const;
     userId = user.id;
+    console.info("[billing-upgrade] authenticated request", { userId: user.id, requestedPlan: plan });
     const { data: profile, error } = await supabase.from("profiles").select("plan, stripe_customer_id, stripe_subscription_id, stripe_subscription_status").eq("id", user.id).maybeSingle();
     databaseQuerySucceeded = !error;
     if (error) return { ok: false, code: "DATABASE_ERROR", message: "Billing is temporarily unavailable." } as const;
+    console.info("[billing-upgrade] profile loaded", { userId: user.id, profilePlan: profile?.plan ?? null, stripeCustomerId: profile?.stripe_customer_id ?? null, storedSubscriptionId: profile?.stripe_subscription_id ?? null, storedSubscriptionStatus: profile?.stripe_subscription_status ?? null });
     const stripe = getStripe();
     const customerId = profile?.stripe_customer_id ?? null;
+    const targetPrice = await stripe.prices.retrieve(selectedPlan.priceId);
+    const targetProductId = typeof targetPrice.product === "string" ? targetPrice.product : targetPrice.product.id;
+    console.info("[billing-upgrade] target price verified", { requestedPlan: plan, targetPriceId: targetPrice.id, targetProductId, targetPriceActive: targetPrice.active, targetPriceType: targetPrice.type, targetRecurringInterval: targetPrice.recurring?.interval ?? null });
+    if (customerId) {
+      const customer = await stripe.customers.retrieve(customerId);
+      console.info("[billing-upgrade] customer verified", { userId: user.id, stripeCustomerId: customerId, customerExists: true, customerDeleted: "deleted" in customer && customer.deleted === true });
+    }
+    if (profile?.stripe_subscription_id) {
+      const storedSubscription = await stripe.subscriptions.retrieve(profile.stripe_subscription_id);
+      const storedItem = storedSubscription.items.data[0];
+      const storedProductId = storedItem ? (typeof storedItem.price.product === "string" ? storedItem.price.product : storedItem.price.product.id) : null;
+      console.info("[billing-upgrade] stored subscription verified", { storedSubscriptionId: storedSubscription.id, storedSubscriptionStatus: storedSubscription.status, storedPriceId: storedItem?.price.id ?? null, storedProductId, storedCustomerId: typeof storedSubscription.customer === "string" ? storedSubscription.customer : storedSubscription.customer.id });
+    }
     const activeSubscriptions = customerId
       ? (await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 })).data
         .filter((subscription) => subscription.status === "active" || subscription.status === "trialing")
         .sort((left, right) => right.created - left.created)
       : [];
+    console.info("[billing-upgrade] active subscriptions queried", { userId: user.id, stripeCustomerId: customerId, activeSubscriptionCount: activeSubscriptions.length, activeSubscriptions: activeSubscriptions.map((subscription) => ({ subscriptionId: subscription.id, status: subscription.status, created: subscription.created, priceId: subscription.items.data[0]?.price.id ?? null, productId: subscription.items.data[0] ? (typeof subscription.items.data[0].price.product === "string" ? subscription.items.data[0].price.product : subscription.items.data[0].price.product.id) : null })) });
 
     if (activeSubscriptions.length) {
       const [existing, ...duplicates] = activeSubscriptions;
@@ -53,7 +69,9 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
       if (existingPlan === plan) return { ok: false, code: "CURRENT_PLAN", message: "This is already your current plan." } as const;
       const item = existing.items.data[0];
       if (!item) return { ok: false, code: "STRIPE_ERROR", message: "Your active subscription could not be updated." } as const;
-
+      const currentProductId = typeof item.price.product === "string" ? item.price.product : item.price.product.id;
+      const updatePayload = { subscriptionId: existing.id, itemId: item.id, currentPriceId: item.price.id, currentProductId, targetPriceId: selectedPlan.priceId, targetProductId, sameProduct: currentProductId === targetProductId, prorationBehavior: "always_invoice", metadataUserId: user.id, metadataPlan: plan };
+      console.info("[billing-upgrade] Stripe subscription update request", updatePayload);
       const updated = await stripe.subscriptions.update(existing.id, {
         items: [{ id: item.id, price: selectedPlan.priceId }],
         proration_behavior: "always_invoice",
@@ -61,7 +79,8 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
       });
       // The verified Stripe webhook is the billing source of truth for Supabase.
       // Do not persist a client-triggered plan change before that webhook arrives.
-      console.info("[billing] subscription updated in Stripe", { userId: user.id, customerId, subscriptionId: updated.id, selectedPlan: plan });
+      const updatedItem = updated.items.data[0];
+      console.info("[billing-upgrade] Stripe subscription update succeeded", { userId: user.id, customerId, subscriptionId: updated.id, status: updated.status, priceId: updatedItem?.price.id ?? null, productId: updatedItem ? (typeof updatedItem.price.product === "string" ? updatedItem.price.product : updatedItem.price.product.id) : null, latestInvoiceId: typeof updated.latest_invoice === "string" ? updated.latest_invoice : updated.latest_invoice?.id ?? null });
       revalidatePath("/");
       revalidatePath("/dashboard");
       return { ok: true, action: "updated", plan } as const;
@@ -72,7 +91,8 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
     return { ok: true, action: "checkout", url: session.url } as const;
   } catch (error) {
     const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
-    console.error("[billing] plan checkout failed", { name: error instanceof Error ? error.name : "UnknownError", type: typeof error, code: typeof record.code === "string" ? record.code : undefined, message: error instanceof Error ? error.message : "Checkout failed.", plan, userId, stripeSecretKeyExists: Boolean(env.STRIPE_SECRET_KEY), selectedPriceIdExists: Boolean(selectedPlan?.priceId), applicationUrl: siteUrl, databaseQuerySucceeded });
+    const raw = record.raw && typeof record.raw === "object" ? record.raw as Record<string, unknown> : {};
+    console.error("[billing-upgrade] request failed", { name: error instanceof Error ? error.name : "UnknownError", type: typeof error, code: typeof record.code === "string" ? record.code : undefined, statusCode: typeof record.statusCode === "number" ? record.statusCode : undefined, requestId: typeof raw.requestId === "string" ? raw.requestId : undefined, message: error instanceof Error ? error.message : "Checkout failed.", stack: error instanceof Error ? error.stack : undefined, requestedPlan: plan, userId, stripeSecretKeyExists: Boolean(env.STRIPE_SECRET_KEY), targetPriceId: selectedPlan?.priceId ?? null, applicationUrl: siteUrl, databaseQuerySucceeded });
     return { ok: false, code: "STRIPE_ERROR", message: "Stripe Checkout is temporarily unavailable." } as const;
   }
 }
