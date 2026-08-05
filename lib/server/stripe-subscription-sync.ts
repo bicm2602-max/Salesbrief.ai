@@ -43,6 +43,29 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
   }
   if (!userId) throw new Error("No Supabase user could be resolved for this subscription.");
 
+  const { data: existingProfile, error: existingProfileError } = await admin
+    .from("profiles")
+    .select("id, plan, stripe_subscription_id, stripe_subscription_status, stripe_price_id, stripe_current_period_start, stripe_current_period_end")
+    .eq("id", userId)
+    .maybeSingle();
+  if (existingProfileError) throw new Error(`Supabase subscription lookup failed: ${existingProfileError.message}`);
+
+  const incomingIsInactive = subscription.status !== "active" && subscription.status !== "trialing";
+  const storedIsActive = existingProfile?.stripe_subscription_status === "active" || existingProfile?.stripe_subscription_status === "trialing";
+  if (incomingIsInactive && storedIsActive && existingProfile?.stripe_subscription_id && existingProfile.stripe_subscription_id !== subscription.id) {
+    console.info("[stripe-sync] ignored stale inactive subscription event", { incomingSubscriptionId: subscription.id, retainedSubscriptionId: existingProfile.stripe_subscription_id, userId });
+    return {
+      customerId,
+      subscriptionId: existingProfile.stripe_subscription_id,
+      priceId: existingProfile.stripe_price_id,
+      plan: existingProfile.plan === "starter" || existingProfile.plan === "pro" || existingProfile.plan === "business" ? existingProfile.plan : "free",
+      userId,
+      status: existingProfile.stripe_subscription_status,
+      periodStart: existingProfile.stripe_current_period_start,
+      periodEnd: existingProfile.stripe_current_period_end,
+    };
+  }
+
   const { data: updatedProfile, error: updateError } = await admin
     .from("profiles")
     .update({

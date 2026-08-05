@@ -16,56 +16,6 @@ async function getBillingUser() {
   return { supabase, user };
 }
 
-export async function createCheckoutSession() {
-  const { supabase, user } = await getBillingUser();
-  if (!env.STRIPE_PRICE_ID) {
-    throw new Error("Stripe price is not configured.");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("stripe_customer_id")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const stripe = getStripe();
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    line_items: [{ price: env.STRIPE_PRICE_ID, quantity: 1 }],
-    success_url: `${getSiteUrl()}/dashboard?checkout=success`,
-    cancel_url: `${getSiteUrl()}/dashboard?checkout=canceled`,
-    client_reference_id: user.id,
-    subscription_data: { metadata: { user_id: user.id } },
-    ...(profile?.stripe_customer_id ? { customer: profile.stripe_customer_id } : { customer_email: user.email }),
-  });
-
-  if (!session.url) {
-    throw new Error("Unable to create a Checkout session.");
-  }
-  redirect(session.url);
-}
-
-export async function createCheckoutSessionUrl() {
-  console.info("[billing] checkout action started", { stage: "checkout" });
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    console.info("[billing] authenticated user checked", { stage: "checkout", userExists: Boolean(user) });
-    if (!user) return { success: false, error: "Please sign in before upgrading." } as const;
-    console.info("[billing] Stripe configuration checked", { stage: "checkout", stripePriceIdExists: Boolean(env.STRIPE_PRICE_ID), stripeSecretKeyExists: Boolean(env.STRIPE_SECRET_KEY), siteUrlExists: Boolean(env.NEXT_PUBLIC_SITE_URL) });
-    if (!env.STRIPE_PRICE_ID) return { success: false, error: "Upgrade is not configured yet." } as const;
-    const { data: profile } = await supabase.from("profiles").select("stripe_customer_id").eq("id", user.id).maybeSingle();
-    const session = await getStripe().checkout.sessions.create({ mode: "subscription", line_items: [{ price: env.STRIPE_PRICE_ID, quantity: 1 }], success_url: `${getSiteUrl()}/dashboard?checkout=success`, cancel_url: `${getSiteUrl()}/dashboard?checkout=canceled`, client_reference_id: user.id, subscription_data: { metadata: { user_id: user.id } }, ...(profile?.stripe_customer_id ? { customer: profile.stripe_customer_id } : { customer_email: user.email }) });
-    console.info("[billing] checkout session created", { stage: "checkout", sessionCreated: Boolean(session.id), sessionUrlExists: Boolean(session.url) });
-    if (!session.url) return { success: false, error: "Unable to open Stripe Checkout." } as const;
-    return { success: true, url: session.url } as const;
-  } catch (error) {
-    const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
-    console.error("[billing] checkout failed", { stage: "checkout", name: error instanceof Error ? error.name : "UnknownError", message: error instanceof Error ? error.message : "Checkout failed.", status: typeof record.statusCode === "number" ? record.statusCode : undefined, code: typeof record.code === "string" ? record.code : undefined });
-    return { success: false, error: "Unable to start Stripe Checkout. Please try again." } as const;
-  }
-}
-
 export async function createCheckoutSessionForPlan(plan: PlanId) {
   let userId: string | undefined;
   let databaseQuerySucceeded = false;
@@ -81,31 +31,32 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
     const { data: profile, error } = await supabase.from("profiles").select("plan, stripe_customer_id, stripe_subscription_id, stripe_subscription_status").eq("id", user.id).maybeSingle();
     databaseQuerySucceeded = !error;
     if (error) return { ok: false, code: "DATABASE_ERROR", message: "Billing is temporarily unavailable." } as const;
-    const currentPlan = profile?.plan === "starter" || profile?.plan === "pro" || profile?.plan === "business" ? profile.plan : "free";
-    const hasActiveSubscription = profile?.stripe_subscription_status === "active" || profile?.stripe_subscription_status === "trialing";
+    const stripe = getStripe();
+    const customerId = profile?.stripe_customer_id ?? null;
+    const activeSubscriptions = customerId
+      ? (await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 })).data
+        .filter((subscription) => subscription.status === "active" || subscription.status === "trialing")
+        .sort((left, right) => right.created - left.created)
+      : [];
 
-    if (hasActiveSubscription) {
-      if (currentPlan === plan) return { ok: false, code: "CURRENT_PLAN", message: "This is already your current plan." } as const;
-      if (!isPlanUpgrade(currentPlan, plan)) return { ok: false, code: "EXISTING_SUBSCRIPTION", message: "Use subscription management to make this change." } as const;
-
-      const stripe = getStripe();
-      let subscriptionId = profile?.stripe_subscription_id ?? null;
-      if (!subscriptionId && profile?.stripe_customer_id) {
-        const subscriptions = await stripe.subscriptions.list({ customer: profile.stripe_customer_id, status: "all", limit: 10 });
-        subscriptionId = subscriptions.data.find((subscription) => subscription.status === "active" || subscription.status === "trialing")?.id ?? null;
+    if (activeSubscriptions.length) {
+      const [existing, ...duplicates] = activeSubscriptions;
+      for (const duplicate of duplicates) {
+        await stripe.subscriptions.cancel(duplicate.id, { invoice_now: false, prorate: false });
+        console.warn("[billing] duplicate active subscription canceled", { userId: user.id, customerId, canceledSubscriptionId: duplicate.id, retainedSubscriptionId: existing.id });
       }
-      if (!subscriptionId) return { ok: false, code: "EXISTING_SUBSCRIPTION", message: "Your active subscription could not be found. Please use Manage subscription." } as const;
 
-      const existing = await stripe.subscriptions.retrieve(subscriptionId);
-      const customerId = typeof existing.customer === "string" ? existing.customer : existing.customer.id;
-      if (profile?.stripe_customer_id && customerId !== profile.stripe_customer_id) return { ok: false, code: "EXISTING_SUBSCRIPTION", message: "Your active subscription could not be verified. Please use Manage subscription." } as const;
-      if (existing.status !== "active" && existing.status !== "trialing") return { ok: false, code: "EXISTING_SUBSCRIPTION", message: "Your active subscription could not be verified. Please use Manage subscription." } as const;
+      const existingPlan = plans.starter.priceId === existing.items.data[0]?.price.id ? "starter"
+        : plans.pro.priceId === existing.items.data[0]?.price.id ? "pro"
+          : plans.business.priceId === existing.items.data[0]?.price.id ? "business"
+            : "free";
+      if (existingPlan === plan) return { ok: false, code: "CURRENT_PLAN", message: "This is already your current plan." } as const;
       const item = existing.items.data[0];
       if (!item) return { ok: false, code: "STRIPE_ERROR", message: "Your active subscription could not be updated." } as const;
 
       const updated = await stripe.subscriptions.update(existing.id, {
         items: [{ id: item.id, price: selectedPlan.priceId }],
-        proration_behavior: "create_prorations",
+        proration_behavior: "always_invoice",
         metadata: { ...existing.metadata, user_id: user.id, plan },
       });
       await syncStripeSubscription(updated, { verifiedUserId: user.id });
@@ -113,7 +64,7 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
       revalidatePath("/dashboard");
       return { ok: true, action: "updated", plan } as const;
     }
-    if (plan === "business") return { ok: false, code: "INVALID_PLAN", message: "Business upgrades are available from Pro." } as const;
+    if (plan === "business") return { ok: false, code: "INVALID_PLAN", message: "Business plans are not available yet." } as const;
     const session = await getStripe().checkout.sessions.create({ mode: "subscription", line_items: [{ price: selectedPlan.priceId, quantity: 1 }], success_url: `${siteUrl}/dashboard?checkout=success`, cancel_url: `${siteUrl}/#pricing`, client_reference_id: user.id, metadata: { user_id: user.id, plan }, subscription_data: { metadata: { user_id: user.id, plan } }, ...(profile?.stripe_customer_id ? { customer: profile.stripe_customer_id } : { customer_email: user.email }) });
     if (!session.url) return { ok: false, code: "STRIPE_ERROR", message: "Stripe Checkout is temporarily unavailable." } as const;
     return { ok: true, action: "checkout", url: session.url } as const;
@@ -122,10 +73,6 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
     console.error("[billing] plan checkout failed", { name: error instanceof Error ? error.name : "UnknownError", type: typeof error, code: typeof record.code === "string" ? record.code : undefined, message: error instanceof Error ? error.message : "Checkout failed.", plan, userId, stripeSecretKeyExists: Boolean(env.STRIPE_SECRET_KEY), selectedPriceIdExists: Boolean(selectedPlan?.priceId), applicationUrl: siteUrl, databaseQuerySucceeded });
     return { ok: false, code: "STRIPE_ERROR", message: "Stripe Checkout is temporarily unavailable." } as const;
   }
-}
-
-function isPlanUpgrade(currentPlan: "free" | PlanId, selectedPlan: PlanId) {
-  return (currentPlan === "starter" && selectedPlan === "pro") || (currentPlan === "pro" && selectedPlan === "business");
 }
 
 export async function getPricingSubscriptionState() {
