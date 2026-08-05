@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { env } from "@/lib/env";
 import { getSiteUrl, getStripe } from "@/lib/stripe";
-import { plans, type PlanId } from "@/lib/server/plans";
+import { getStripePlans, type PlanId } from "@/lib/server/plans";
+import { isStripePlanId } from "@/lib/server/stripe-plan-mapping";
 import { syncStripeSubscription } from "@/lib/server/stripe-subscription-sync";
 import { getCurrentSubscriptionState } from "@/lib/server/subscription-state";
 
@@ -19,16 +20,17 @@ async function getBillingUser() {
 export async function createCheckoutSessionForPlan(plan: PlanId) {
   let userId: string | undefined;
   let databaseQuerySucceeded = false;
+  if (!isStripePlanId(plan)) return { ok: false, code: "INVALID_PLAN", message: "This plan is unavailable." } as const;
+  let plans: ReturnType<typeof getStripePlans>;
+  try { plans = getStripePlans(); } catch (error) { console.error("[billing-upgrade] invalid Stripe plan configuration", { message: error instanceof Error ? error.message : "Invalid Stripe price configuration." }); return { ok: false, code: "PRICE_NOT_CONFIGURED", message: "Configuration error: Stripe plan prices are invalid." } as const; }
   const selectedPlan = plans[plan];
-  if (plan !== "starter" && plan !== "pro" && plan !== "business") return { ok: false, code: "INVALID_PLAN", message: "This plan is unavailable." } as const;
-  if (!selectedPlan.priceId || !selectedPlan.priceId.startsWith("price_")) return { ok: false, code: "PRICE_NOT_CONFIGURED", message: "Stripe Checkout is temporarily unavailable." } as const;
   let siteUrl = "";
   try { siteUrl = getSiteUrl(); new URL(siteUrl); } catch { return { ok: false, code: "INVALID_APP_URL", message: "Stripe Checkout is temporarily unavailable." } as const; }
   try {
     const supabase = await createServerSupabaseClient(); const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { ok: false, code: "AUTH_REQUIRED", message: "Please sign in before choosing a plan." } as const;
     userId = user.id;
-    console.info("[billing-upgrade] authenticated request", { userId: user.id, requestedPlan: plan });
+    console.info("[billing-upgrade] authenticated request", { userId: user.id, requestedPlan: plan, resolvedTargetPriceId: selectedPlan.priceId });
     const { data: profile, error } = await supabase.from("profiles").select("plan, stripe_customer_id, stripe_subscription_id, stripe_subscription_status").eq("id", user.id).maybeSingle();
     databaseQuerySucceeded = !error;
     if (error) return { ok: false, code: "DATABASE_ERROR", message: "Billing is temporarily unavailable." } as const;
@@ -69,6 +71,10 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
       if (existingPlan === plan) return { ok: false, code: "CURRENT_PLAN", message: "This is already your current plan." } as const;
       const item = existing.items.data[0];
       if (!item) return { ok: false, code: "STRIPE_ERROR", message: "Your active subscription could not be updated." } as const;
+      if (item.price.id === selectedPlan.priceId) {
+        console.error("[billing-upgrade] invalid resolved target price", { requestedPlan: plan, currentPriceId: item.price.id, resolvedTargetPriceId: selectedPlan.priceId });
+        return { ok: false, code: "PRICE_NOT_CONFIGURED", message: "Configuration error: target Stripe Price ID matches the current subscription." } as const;
+      }
       const currentProductId = typeof item.price.product === "string" ? item.price.product : item.price.product.id;
       const updatePayload = { subscriptionId: existing.id, itemId: item.id, currentPriceId: item.price.id, currentProductId, targetPriceId: selectedPlan.priceId, targetProductId, sameProduct: currentProductId === targetProductId, prorationBehavior: "always_invoice", metadataUserId: user.id, metadataPlan: plan };
       console.info("[billing-upgrade] Stripe subscription update request", updatePayload);
