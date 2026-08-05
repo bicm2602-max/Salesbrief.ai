@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { createCheckoutSessionForPlan } from "@/lib/server/billing";
 
@@ -14,6 +15,7 @@ const offers = {
 } as const;
 
 export function QuotaUpgradePanel({ plan }: QuotaUpgradePanelProps) {
+  const router = useRouter();
   const [loading, setLoading] = React.useState<"starter" | "pro" | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const availableOffers = plan === "starter" ? ["pro"] as const : ["starter", "pro"] as const;
@@ -24,8 +26,12 @@ export function QuotaUpgradePanel({ plan }: QuotaUpgradePanelProps) {
     setError(null);
     try {
       const result = await createCheckoutSessionForPlan(selectedPlan);
-      if (result.ok && result.url) {
+      if (result.ok && result.action === "checkout" && result.url) {
         window.location.assign(result.url);
+        return;
+      }
+      if (result.ok && result.action === "updated") {
+        router.refresh();
         return;
       }
       setError("code" in result && process.env.NODE_ENV === "development"
