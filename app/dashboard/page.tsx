@@ -34,6 +34,7 @@ export default async function DashboardHomePage({ searchParams }: { searchParams
   const limit = subscription.analysesLimit;
   const remaining = subscription.analysesRemaining;
   const subscriptionDates = getSubscriptionDatePresentation(subscription);
+  console.info("[subscription-presentation-debug]", { subscriptionId: subscription.stripeSubscriptionId, status: subscription.status, cancelAtPeriodEnd: subscription.cancelAtPeriodEnd, currentPeriodEnd: subscription.currentPeriodEnd, plan: subscription.plan });
   const name = profile?.full_name || (typeof user.user_metadata.full_name === "string" ? user.user_metadata.full_name : "") || user.email?.split("@")[0] || "";
   const checkout = (await searchParams).checkout === "success";
   const paidPlan = activePlan === "free" ? null : activePlan;
