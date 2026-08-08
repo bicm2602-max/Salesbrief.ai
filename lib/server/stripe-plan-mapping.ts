@@ -19,6 +19,10 @@ export function shouldIgnoreStaleInactiveSubscription(input: { storedSubscriptio
   return incomingIsInactive && storedIsActive && Boolean(input.storedSubscriptionId) && input.storedSubscriptionId !== input.incomingSubscriptionId;
 }
 
+export function hasActiveStripeEntitlement(status: string | null, currentPeriodEnd: string | null, now = Date.now()) {
+  return (status === "active" || status === "trialing") && Boolean(currentPeriodEnd) && new Date(currentPeriodEnd!).getTime() > now;
+}
+
 export function resolveStripePlanPriceIds(priceIds: StripePlanPriceIds): StripePlanPriceIds {
   const entries = Object.entries(priceIds) as Array<[keyof StripePlanPriceIds, string]>;
   for (const [plan, priceId] of entries) {

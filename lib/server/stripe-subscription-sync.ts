@@ -36,6 +36,7 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
     plan = stripePlan;
   } else {
     plan = "free";
+    console.info("[billing-sync] subscription canceled", { subscriptionId: subscription.id, priceId, stripeStatus: subscription.status });
   }
   const metadataUserId = subscription.metadata.user_id;
   let userId = metadataUserId || options.clientReferenceId || options.verifiedUserId;
@@ -75,6 +76,8 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
 
   console.info("[billing-sync] stripe subscription authoritative", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null, stripeDerivedPlan: plan });
   if (existingProfile?.plan !== plan) console.info("[billing-sync] correcting Supabase plan", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null, stripeDerivedPlan: plan });
+  if (isStripeActive && subscription.cancel_at_period_end) console.info("[billing-sync] cancellation scheduled", { userId, subscriptionId: subscription.id, priceId, currentPeriodEnd: periodEnd });
+  if (!isStripeActive && existingProfile?.plan !== "free") console.info("[billing-sync] entitlement revoked", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null });
 
   const { data: updatedProfile, error: updateError } = await admin
     .from("profiles")
@@ -96,4 +99,22 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
   console.info("[billing-sync] profile synchronized", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null, stripeDerivedPlan: plan });
 
   return { customerId, subscriptionId: subscription.id, priceId, plan, userId, status: subscription.status, periodStart, periodEnd };
+}
+
+export async function revokeStripeEntitlementForMissingSubscription(userId: string, customerId: string) {
+  const admin = createAdminSupabaseClient();
+  const { data: existingProfile, error: lookupError } = await admin
+    .from("profiles")
+    .select("plan, stripe_subscription_id, stripe_price_id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (lookupError) throw new Error(`Supabase subscription lookup failed: ${lookupError.message}`);
+  const { error: updateError } = await admin
+    .from("profiles")
+    .update({ plan: "free", stripe_customer_id: customerId, stripe_subscription_id: null, stripe_subscription_status: "canceled", stripe_price_id: null, stripe_current_period_start: null, stripe_current_period_end: null, stripe_cancel_at_period_end: false })
+    .eq("id", userId);
+  if (updateError) throw new Error(`Supabase subscription revocation failed: ${updateError.message}`);
+  console.info("[billing-sync] subscription canceled", { userId, subscriptionId: existingProfile?.stripe_subscription_id ?? null, priceId: existingProfile?.stripe_price_id ?? null, stripeStatus: "missing" });
+  if (existingProfile?.plan !== "free") console.info("[billing-sync] entitlement revoked", { userId, subscriptionId: existingProfile?.stripe_subscription_id ?? null, priceId: existingProfile?.stripe_price_id ?? null, oldSupabasePlan: existingProfile?.plan ?? null });
+  console.info("[billing-sync] profile synchronized", { userId, subscriptionId: null, priceId: null, oldSupabasePlan: existingProfile?.plan ?? null, stripeDerivedPlan: "free" });
 }

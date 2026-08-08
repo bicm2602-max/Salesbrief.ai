@@ -15,6 +15,8 @@ async function syncAndLog(event: Stripe.Event, subscription: Stripe.Subscription
   const result = await syncStripeSubscription(subscription, { clientReferenceId });
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/new-analysis");
+  revalidatePath("/dashboard/plans");
+  revalidatePath("/dashboard/settings");
   console.info("[stripe-webhook] subscription synchronized", { eventType: event.type, eventId: event.id, stripeCustomerId: result.customerId, stripeSubscriptionId: result.subscriptionId, stripePriceId: result.priceId, resolvedPlan: result.plan, resolvedUserId: result.userId, subscriptionStatus: result.status, periodStart: result.periodStart, periodEnd: result.periodEnd, supabaseUpdateSuccess: true });
 }
 

@@ -43,3 +43,16 @@ test("does not allow a stale canceled subscription to overwrite an active subscr
   const { shouldIgnoreStaleInactiveSubscription } = await loadResolver();
   assert.equal(shouldIgnoreStaleInactiveSubscription({ storedSubscriptionId: "sub_active", storedStatus: "active", incomingSubscriptionId: "sub_canceled", incomingStatus: "canceled" }), true);
 });
+test("active Pro scheduled for cancellation remains entitled until the period end", async () => {
+  const { hasActiveStripeEntitlement, resolvePlanFromStripePriceId } = await loadResolver();
+  assert.equal(hasActiveStripeEntitlement("active", "2030-01-01T00:00:00.000Z", Date.parse("2029-01-01T00:00:00.000Z")), true);
+  assert.equal(resolvePlanFromStripePriceId("price_pro", valid), "pro");
+});
+test("an immediately canceled Pro subscription has no entitlement", async () => {
+  const { hasActiveStripeEntitlement } = await loadResolver();
+  assert.equal(hasActiveStripeEntitlement("canceled", "2030-01-01T00:00:00.000Z", Date.parse("2029-01-01T00:00:00.000Z")), false);
+});
+test("a stale Supabase Pro record without a valid active Stripe subscription has no entitlement", async () => {
+  const { hasActiveStripeEntitlement } = await loadResolver();
+  assert.equal(hasActiveStripeEntitlement("canceled", null), false);
+});
