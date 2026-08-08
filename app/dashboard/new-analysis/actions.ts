@@ -49,6 +49,7 @@ async function runAnalysis(
   },
 ) {
   let normalizedUrl = "";
+  let reservedAnalysisId: string | null = null;
 
   try {
     const parsedUrl = await validateAnalysisUrl(rawUrl);
@@ -90,7 +91,25 @@ async function runAnalysis(
       }
     }
 
-    if (!quotaState.allowed) return { success: false, error: quotaState.message ?? "You've reached your analysis limit." };
+    if (!quotaState.allowed) {
+      console.info("[analysis-action] quota rejected", { userId, source, plan: quotaState.plan, used: quotaState.used, limit: quotaState.limit });
+      return { success: false, error: quotaState.message ?? "You've reached your analysis limit." };
+    }
+
+    // The database trigger atomically reserves capacity before OpenAI work.
+    // This is the final authority; the state check above only improves UX.
+    const { data: reservation, error: reservationError } = await supabase
+      .from("analyses")
+      .insert({ user_id: userId, website: normalizedUrl, json_result: {}, score: 0, status: "processing" })
+      .select("id")
+      .single();
+    if (reservationError) {
+      console.info("[analysis-action] quota reservation rejected", { userId, source, code: reservationError.code, message: reservationError.message });
+      if (reservationError.message === "free_analysis_quota_exceeded") return { success: false, error: "You've used all 3 free analyses." };
+      if (reservationError.message === "starter_analysis_quota_exceeded") return { success: false, error: "You've used all 10 Starter analyses for this billing period." };
+      throw new Error("Unable to reserve analysis capacity.");
+    }
+    reservedAnalysisId = reservation.id;
 
     console.log({
       OPENAI_API_KEY_EXISTS: !!process.env.OPENAI_API_KEY,
@@ -100,8 +119,6 @@ async function runAnalysis(
     const result = await generateSalesBrief(normalizedUrl);
     console.info("[analysis-action] analysis generation completed", { stage: "OpenAI response parsing", url: normalizedUrl });
     const payload = {
-      user_id: userId,
-      website: normalizedUrl,
       json_result: result,
       score: result.salesScore,
       status: "completed",
@@ -110,7 +127,9 @@ async function runAnalysis(
     console.info("[analysis-action] persistence started", { stage: "Supabase persistence", url: normalizedUrl });
     const { data: savedAnalysis, error: insertError } = await supabase
       .from("analyses")
-      .insert(payload)
+      .update(payload)
+      .eq("id", reservedAnalysisId)
+      .eq("user_id", userId)
       .select("id")
       .single();
     if (insertError) {
@@ -146,6 +165,10 @@ async function runAnalysis(
     const serializableResult = JSON.parse(JSON.stringify(result)) as typeof result;
     return { success: true, result: serializableResult, analysisId: savedAnalysis.id };
   } catch (error) {
+    if (reservedAnalysisId) {
+      const supabase = await createServerSupabaseClient();
+      await supabase.from("analyses").delete().eq("id", reservedAnalysisId).eq("status", "processing");
+    }
     const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
     const stage = error instanceof AnalysisPipelineError ? error.stage : "server action";
     const name = error instanceof Error ? error.name : "UnknownError";
