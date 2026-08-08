@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { env } from "@/lib/env";
 import { getSiteUrl, getStripe } from "@/lib/stripe";
-import { getStripePlans, type PlanId } from "@/lib/server/plans";
+import { getStripePlans, resolvePlanFromStripePriceId, type PlanId } from "@/lib/server/plans";
 import { isStripePlanId } from "@/lib/server/stripe-plan-mapping";
 import { syncStripeSubscription } from "@/lib/server/stripe-subscription-sync";
 import { getCurrentSubscriptionState } from "@/lib/server/subscription-state";
@@ -64,13 +64,17 @@ export async function createCheckoutSessionForPlan(plan: PlanId) {
         console.warn("[billing] duplicate active subscription canceled", { userId: user.id, customerId, canceledSubscriptionId: duplicate.id, retainedSubscriptionId: existing.id });
       }
 
-      const existingPlan = plans.starter.priceId === existing.items.data[0]?.price.id ? "starter"
-        : plans.pro.priceId === existing.items.data[0]?.price.id ? "pro"
-          : plans.business.priceId === existing.items.data[0]?.price.id ? "business"
-            : "free";
-      if (existingPlan === plan) return { ok: false, code: "CURRENT_PLAN", message: "This is already your current plan." } as const;
       const item = existing.items.data[0];
       if (!item) return { ok: false, code: "STRIPE_ERROR", message: "Your active subscription could not be updated." } as const;
+      const existingPlan = resolvePlanFromStripePriceId(item.price.id);
+      if (!existingPlan) return { ok: false, code: "STRIPE_ERROR", message: "Your active subscription uses an unknown Stripe Price ID." } as const;
+      if (existingPlan === plan) {
+        const synchronized = await syncStripeSubscription(existing, { verifiedUserId: user.id });
+        console.info("[billing-sync] Stripe subscription authoritative", { userId: user.id, subscriptionId: existing.id, priceId: item.price.id, oldSupabasePlan: profile?.plan ?? null, stripeDerivedPlan: synchronized.plan });
+        revalidatePath("/");
+        revalidatePath("/dashboard");
+        return { ok: true, action: "updated", plan } as const;
+      }
       if (item.price.id === selectedPlan.priceId) {
         console.error("[billing-upgrade] invalid resolved target price", { requestedPlan: plan, currentPriceId: item.price.id, resolvedTargetPriceId: selectedPlan.priceId });
         return { ok: false, code: "PRICE_NOT_CONFIGURED", message: "Configuration error: target Stripe Price ID matches the current subscription." } as const;

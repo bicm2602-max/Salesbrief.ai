@@ -19,3 +19,27 @@ for (const [name, target] of [["Free to Starter", "starter"], ["Free to Pro", "p
 test("rejects identical Price IDs", async () => { const { resolveStripePlanPriceIds } = await loadResolver(); assert.throws(() => resolveStripePlanPriceIds({ ...valid, pro: valid.starter }), /must all be different/); });
 test("rejects missing Price IDs", async () => { const { resolveStripePlanPriceIds } = await loadResolver(); assert.throws(() => resolveStripePlanPriceIds({ ...valid, pro: "" }), /PRO_PRICE_ID is required/); });
 test("rejects an invalid requested plan", async () => { const { isStripePlanId } = await loadResolver(); assert.equal(isStripePlanId("invalid"), false); });
+test("corrects a Supabase Starter profile from an authoritative Stripe Pro price", async () => {
+  const { resolvePlanFromStripePriceId } = await loadResolver();
+  assert.equal(resolvePlanFromStripePriceId("price_pro", valid), "pro");
+});
+test("corrects a Supabase Pro profile from an authoritative Stripe Starter price", async () => {
+  const { resolvePlanFromStripePriceId } = await loadResolver();
+  assert.equal(resolvePlanFromStripePriceId("price_starter", valid), "starter");
+});
+test("treats an active target price as a synchronization success", async () => {
+  const { resolvePlanFromStripePriceId } = await loadResolver();
+  assert.equal(resolvePlanFromStripePriceId("price_pro", valid), "pro");
+});
+test("customer.subscription.updated resolves a Starter to Pro change from the Stripe Price ID", async () => {
+  const { resolvePlanFromStripePriceId } = await loadResolver();
+  assert.equal(resolvePlanFromStripePriceId("price_pro", valid), "pro");
+});
+test("fails safely for an unknown Stripe Price ID", async () => {
+  const { resolvePlanFromStripePriceId } = await loadResolver();
+  assert.equal(resolvePlanFromStripePriceId("price_unknown", valid), null);
+});
+test("does not allow a stale canceled subscription to overwrite an active subscription", async () => {
+  const { shouldIgnoreStaleInactiveSubscription } = await loadResolver();
+  assert.equal(shouldIgnoreStaleInactiveSubscription({ storedSubscriptionId: "sub_active", storedStatus: "active", incomingSubscriptionId: "sub_canceled", incomingStatus: "canceled" }), true);
+});

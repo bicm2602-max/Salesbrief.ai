@@ -2,7 +2,8 @@ import "server-only";
 
 import Stripe from "stripe";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { planFromPrice, type PlanId } from "@/lib/server/plans";
+import { resolvePlanFromStripePriceId, type PlanId } from "@/lib/server/plans";
+import { shouldIgnoreStaleInactiveSubscription } from "@/lib/server/stripe-plan-mapping";
 
 type SyncOptions = {
   clientReferenceId?: string | null;
@@ -27,7 +28,15 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
   const priceId = item?.price.id ?? null;
   const periodStart = item?.current_period_start ? new Date(item.current_period_start * 1000).toISOString() : null;
   const periodEnd = item?.current_period_end ? new Date(item.current_period_end * 1000).toISOString() : null;
-  const plan = subscription.status === "active" || subscription.status === "trialing" ? planFromPrice(priceId ?? "") : "free";
+  const isStripeActive = subscription.status === "active" || subscription.status === "trialing";
+  const stripePlan = resolvePlanFromStripePriceId(priceId);
+  let plan: PlanId | "free";
+  if (isStripeActive) {
+    if (!stripePlan) throw new Error(`Unknown active Stripe Price ID: ${priceId ?? "missing"}.`);
+    plan = stripePlan;
+  } else {
+    plan = "free";
+  }
   const metadataUserId = subscription.metadata.user_id;
   let userId = metadataUserId || options.clientReferenceId || options.verifiedUserId;
 
@@ -50,10 +59,8 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
     .maybeSingle();
   if (existingProfileError) throw new Error(`Supabase subscription lookup failed: ${existingProfileError.message}`);
 
-  const incomingIsInactive = subscription.status !== "active" && subscription.status !== "trialing";
-  const storedIsActive = existingProfile?.stripe_subscription_status === "active" || existingProfile?.stripe_subscription_status === "trialing";
-  if (incomingIsInactive && storedIsActive && existingProfile?.stripe_subscription_id && existingProfile.stripe_subscription_id !== subscription.id) {
-    console.info("[stripe-sync] ignored stale inactive subscription event", { incomingSubscriptionId: subscription.id, retainedSubscriptionId: existingProfile.stripe_subscription_id, userId });
+  if (existingProfile && shouldIgnoreStaleInactiveSubscription({ storedSubscriptionId: existingProfile.stripe_subscription_id ?? null, storedStatus: existingProfile.stripe_subscription_status ?? null, incomingSubscriptionId: subscription.id, incomingStatus: subscription.status })) {
+    console.info("[stripe-sync] ignored stale inactive subscription event", { incomingSubscriptionId: subscription.id, retainedSubscriptionId: existingProfile?.stripe_subscription_id ?? null, userId });
     return {
       customerId,
       subscriptionId: existingProfile.stripe_subscription_id,
@@ -65,6 +72,9 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
       periodEnd: existingProfile.stripe_current_period_end,
     };
   }
+
+  console.info("[billing-sync] stripe subscription authoritative", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null, stripeDerivedPlan: plan });
+  if (existingProfile?.plan !== plan) console.info("[billing-sync] correcting Supabase plan", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null, stripeDerivedPlan: plan });
 
   const { data: updatedProfile, error: updateError } = await admin
     .from("profiles")
@@ -83,6 +93,7 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
     .maybeSingle();
   if (updateError) throw new Error(`Supabase subscription update failed: ${updateError.message}`);
   if (!updatedProfile) throw new Error("Supabase profile was not found for the resolved user.");
+  console.info("[billing-sync] profile synchronized", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null, stripeDerivedPlan: plan });
 
   return { customerId, subscriptionId: subscription.id, priceId, plan, userId, status: subscription.status, periodStart, periodEnd };
 }

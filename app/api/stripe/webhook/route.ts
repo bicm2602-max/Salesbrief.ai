@@ -2,7 +2,7 @@ import Stripe from "stripe";
 import { revalidatePath } from "next/cache";
 import { getStripe } from "@/lib/stripe";
 import { syncStripeSubscription } from "@/lib/server/stripe-subscription-sync";
-import { planFromPrice } from "@/lib/server/plans";
+import { resolvePlanFromStripePriceId } from "@/lib/server/plans";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ async function syncAndLog(event: Stripe.Event, subscription: Stripe.Subscription
   const item = subscription.items.data[0];
   const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id;
   const priceId = item?.price.id ?? null;
-  console.info("[stripe-webhook] subscription sync started", { eventType: event.type, eventId: event.id, stripeCustomerId: customerId, stripeSubscriptionId: subscription.id, stripePriceId: priceId, resolvedPlan: planFromPrice(priceId ?? ""), metadataUserId: subscription.metadata.user_id || null, clientReferenceId: clientReferenceId ?? null, subscriptionStatus: subscription.status, periodStart: item?.current_period_start ? new Date(item.current_period_start * 1000).toISOString() : null, periodEnd: item?.current_period_end ? new Date(item.current_period_end * 1000).toISOString() : null });
+  console.info("[stripe-webhook] subscription sync started", { eventType: event.type, eventId: event.id, stripeCustomerId: customerId, stripeSubscriptionId: subscription.id, stripePriceId: priceId, resolvedPlan: resolvePlanFromStripePriceId(priceId), metadataUserId: subscription.metadata.user_id || null, clientReferenceId: clientReferenceId ?? null, subscriptionStatus: subscription.status, periodStart: item?.current_period_start ? new Date(item.current_period_start * 1000).toISOString() : null, periodEnd: item?.current_period_end ? new Date(item.current_period_end * 1000).toISOString() : null });
   const result = await syncStripeSubscription(subscription, { clientReferenceId });
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/new-analysis");

@@ -1,6 +1,6 @@
 import "server-only";
 import { env } from "@/lib/env";
-import { resolveStripePlanPriceIds } from "@/lib/server/stripe-plan-mapping";
+import { resolvePlanFromStripePriceId as resolveConfiguredPlanFromPriceId, resolveStripePlanPriceIds } from "@/lib/server/stripe-plan-mapping";
 export type PlanId = "starter" | "pro" | "business";
 
 export function getStripePlans() {
@@ -12,7 +12,7 @@ export function validateStripePlanConfiguration() {
   getStripePlans();
 }
 
-export function planFromPrice(priceId: string): PlanId | "free" {
-  const plans = getStripePlans();
-  return (Object.entries(plans).find(([, plan]) => plan.priceId === priceId)?.[0] as PlanId | undefined) ?? "free";
+export function resolvePlanFromStripePriceId(priceId: string | null): PlanId | null {
+  const configuredPrices = getStripePlans();
+  return resolveConfiguredPlanFromPriceId(priceId, { starter: configuredPrices.starter.priceId, pro: configuredPrices.pro.priceId, business: configuredPrices.business.priceId });
 }
