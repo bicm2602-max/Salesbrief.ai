@@ -25,8 +25,8 @@ const links = [
 
 export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
-  const [billing, setBilling] = React.useState<{ plan: "free" | "starter" | "pro" | "business"; displayName: string; detail: string; remaining: number | null; canManage: boolean } | null>(null);
-  React.useEffect(() => { void getSubscriptionDisplay().then((result) => setBilling({ plan: result.plan, displayName: result.displayName, detail: result.detail, remaining: result.remaining, canManage: result.canManage })); }, []);
+  const [billing, setBilling] = React.useState<{ plan: "free" | "starter" | "pro" | "business"; displayName: string; detail: string; remaining: number | null; canManage: boolean; schedule: string | null } | null>(null);
+  React.useEffect(() => { void getSubscriptionDisplay().then((result) => setBilling({ plan: result.plan, displayName: result.displayName, detail: result.detail, remaining: result.remaining, canManage: result.canManage, schedule: result.schedule })); }, []);
 
   const content = (
     <div className="flex h-full flex-col border-r border-white/10 bg-slate-950/80 px-4 py-5 backdrop-blur-xl">
@@ -75,6 +75,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
         </div>
         {!collapsed ? <>
           <p className="mt-3 text-sm leading-7 text-slate-400">{billing?.detail ?? "Loading billing details…"}</p>
+          {billing?.schedule ? <p className="mt-1 text-xs text-amber-200">{billing.schedule}</p> : null}
           {billing?.plan === "starter" && billing.remaining !== null ? <p className="mt-1 text-xs text-slate-500">{billing.remaining} analyses remaining</p> : null}
           {billing ? <div className="mt-3"><DashboardUpgradeButton compact /></div> : null}
         </> : null}

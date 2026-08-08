@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { AnalysisResult } from "@/types/analysis";
 import { getCurrentSubscriptionState } from "@/lib/server/subscription-state";
+import { getSubscriptionDatePresentation } from "@/lib/billing/subscription-presentation";
 
 function displayName(user: { email?: string; user_metadata?: Record<string, unknown> }, profile?: { full_name?: string | null }) {
   const fullName = profile?.full_name || (typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : "");
@@ -21,13 +22,14 @@ export async function getDashboardIdentity() {
 export async function getSubscriptionDisplay() {
   try {
   const state = await getCurrentSubscriptionState();
-  if (!state) return { success: false, plan: "free", displayName: "Free plan", detail: "3 total free analyses", remaining: null, canManage: false } as const;
+  if (!state) return { success: false, plan: "free", displayName: "Free plan", detail: "3 total free analyses", remaining: null, canManage: false, schedule: null } as const;
   const plan = state.plan;
   const detail = plan === "starter" ? "10 analyses per billing period" : plan === "pro" ? "Unlimited analyses" : plan === "business" ? "Active subscription" : "3 total free analyses";
-  return { success: true, plan, displayName: `${plan.charAt(0).toUpperCase()}${plan.slice(1)} plan`, detail, remaining: plan === "starter" ? state.analysesRemaining : null, canManage: plan !== "free" } as const;
+  const schedule = getSubscriptionDatePresentation(state)?.planDate ?? null;
+  return { success: true, plan, displayName: `${plan.charAt(0).toUpperCase()}${plan.slice(1)} plan`, detail, remaining: plan === "starter" ? state.analysesRemaining : null, canManage: plan !== "free", schedule } as const;
   } catch (error) {
     console.error("[dashboard] subscription display failed", { name: error instanceof Error ? error.name : "UnknownError", message: error instanceof Error ? error.message : "Unable to load subscription." });
-    return { success: false, plan: "free", displayName: "Billing unavailable", detail: "Unable to load subscription", remaining: null, canManage: false } as const;
+    return { success: false, plan: "free", displayName: "Billing unavailable", detail: "Unable to load subscription", remaining: null, canManage: false, schedule: null } as const;
   }
 }
 

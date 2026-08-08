@@ -8,6 +8,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createCustomerPortalSession } from "@/lib/server/billing";
 import { getCurrentSubscriptionState } from "@/lib/server/subscription-state";
 import { DashboardUpgradeButton } from "@/components/billing/dashboard-upgrade-button";
+import { getSubscriptionDatePresentation } from "@/lib/billing/subscription-presentation";
 import type { AnalysisResult } from "@/types/analysis";
 
 function formatDate(value: string | null | undefined) {
@@ -32,7 +33,7 @@ export default async function DashboardHomePage({ searchParams }: { searchParams
   const used = subscription.analysesUsed;
   const limit = subscription.analysesLimit;
   const remaining = subscription.analysesRemaining;
-  const renewalDate = formatDate(subscription.currentPeriodEnd);
+  const subscriptionDates = getSubscriptionDatePresentation(subscription);
   const name = profile?.full_name || (typeof user.user_metadata.full_name === "string" ? user.user_metadata.full_name : "") || user.email?.split("@")[0] || "";
   const checkout = (await searchParams).checkout === "success";
   const paidPlan = activePlan === "free" ? null : activePlan;
@@ -63,14 +64,14 @@ export default async function DashboardHomePage({ searchParams }: { searchParams
 
       <CheckoutStatus checkoutReturned={checkout} activePlan={paidPlan} />
 
-      {subscription.cancelAtPeriodEnd && subscription.isActive && renewalDate ? <p className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">Your plan will remain active until {renewalDate}.</p> : null}
+      {subscriptionDates?.notice ? <p className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{subscriptionDates.notice}</p> : null}
       {!subscription.isActive && subscription.status && subscription.status !== "active" && subscription.status !== "trialing" ? <p className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">Your paid subscription is not active. Free access is currently available.</p> : null}
 
       <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
           <div className="flex items-center gap-2 text-sm font-medium uppercase tracking-[0.2em] text-blue-300"><Zap className="size-4" />Your plan</div>
           <h2 className="mt-5 text-3xl font-semibold tracking-tight text-slate-50">{activePlan.charAt(0).toUpperCase() + activePlan.slice(1)} plan</h2>
-          <ul className="mt-5 space-y-2 text-sm leading-7 text-slate-300">{planCopy.rules.map((rule) => <li key={rule}>• {rule}</li>)}{renewalDate && activePlan !== "free" ? <li>• Renews on {renewalDate}</li> : null}</ul>
+          <ul className="mt-5 space-y-2 text-sm leading-7 text-slate-300">{planCopy.rules.map((rule) => <li key={rule}>• {rule}</li>)}{subscriptionDates ? <li>• {subscriptionDates.planDate}</li> : null}</ul>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href="/dashboard/new-analysis" className="rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-500">Analyze website</Link>
             {activePlan === "free" ? <DashboardUpgradeButton /> : <form action={createCustomerPortalSession}><button type="submit" className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-white/10">Manage subscription</button></form>}
@@ -80,7 +81,7 @@ export default async function DashboardHomePage({ searchParams }: { searchParams
           <p className="text-sm text-slate-400">Current access</p>
           <p className="mt-2 text-3xl font-semibold text-slate-50">{activePlan === "pro" || activePlan === "business" ? "Unlimited analyses" : `${used} of ${limit} analyses used`}</p>
           <p className="mt-4 text-sm leading-7 text-slate-400">{activePlan === "starter" ? `${remaining} analyses remaining this billing period.` : activePlan === "free" ? `${remaining} free analyses remaining.` : "Your plan includes unlimited analyses while active."}</p>
-          {renewalDate && activePlan !== "free" ? <p className="mt-5 text-sm text-blue-200">Renewal date: {renewalDate}</p> : null}
+          {subscriptionDates ? <p className="mt-5 text-sm text-blue-200">{subscriptionDates.accessDate}</p> : null}
         </div>
       </section>
 
