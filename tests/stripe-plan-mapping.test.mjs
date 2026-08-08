@@ -44,9 +44,31 @@ test("does not allow a stale canceled subscription to overwrite an active subscr
   assert.equal(shouldIgnoreStaleInactiveSubscription({ storedSubscriptionId: "sub_active", storedStatus: "active", incomingSubscriptionId: "sub_canceled", incomingStatus: "canceled" }), true);
 });
 test("active Pro scheduled for cancellation remains entitled until the period end", async () => {
-  const { hasActiveStripeEntitlement, resolvePlanFromStripePriceId } = await loadResolver();
+  const { hasActiveStripeEntitlement, isStripeCancellationScheduled, resolvePlanFromStripePriceId } = await loadResolver();
   assert.equal(hasActiveStripeEntitlement("active", "2030-01-01T00:00:00.000Z", Date.parse("2029-01-01T00:00:00.000Z")), true);
   assert.equal(resolvePlanFromStripePriceId("price_pro", valid), "pro");
+  assert.equal(isStripeCancellationScheduled({ status: "active", cancelAtPeriodEnd: true, cancelAt: null, now: Date.parse("2026-08-09T00:00:00.000Z") }), true);
+});
+test("an active subscription with a future Stripe cancel_at is scheduled to cancel", async () => {
+  const { isStripeCancellationScheduled } = await loadResolver();
+  assert.equal(isStripeCancellationScheduled({ status: "active", cancelAtPeriodEnd: false, cancelAt: Math.floor(Date.parse("2026-09-08T00:00:00.000Z") / 1000), now: Date.parse("2026-08-09T00:00:00.000Z") }), true);
+});
+test("an ordinary active subscription is presented as renewing", async () => {
+  const { isStripeCancellationScheduled } = await loadResolver();
+  assert.equal(isStripeCancellationScheduled({ status: "active", cancelAtPeriodEnd: false, cancelAt: null, now: Date.parse("2026-08-09T00:00:00.000Z") }), false);
+});
+test("a canceled subscription is not presented as a scheduled cancellation", async () => {
+  const { isStripeCancellationScheduled } = await loadResolver();
+  assert.equal(isStripeCancellationScheduled({ status: "canceled", cancelAtPeriodEnd: true, cancelAt: Math.floor(Date.parse("2026-09-08T00:00:00.000Z") / 1000), now: Date.parse("2026-08-09T00:00:00.000Z") }), false);
+});
+test("selects the newest active subscription instead of a stale active subscription", async () => {
+  const { selectAuthoritativeActiveSubscription } = await loadResolver();
+  const selected = selectAuthoritativeActiveSubscription([
+    { id: "sub_old", status: "active", created: 100 },
+    { id: "sub_canceled", status: "canceled", created: 300 },
+    { id: "sub_new", status: "active", created: 200 },
+  ]);
+  assert.equal(selected.id, "sub_new");
 });
 test("an immediately canceled Pro subscription has no entitlement", async () => {
   const { hasActiveStripeEntitlement } = await loadResolver();

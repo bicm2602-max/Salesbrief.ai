@@ -5,7 +5,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe";
 import { revokeStripeEntitlementForMissingSubscription, syncStripeSubscription } from "@/lib/server/stripe-subscription-sync";
 import { resolvePlanFromStripePriceId } from "@/lib/server/plans";
-import { hasActiveStripeEntitlement } from "@/lib/server/stripe-plan-mapping";
+import { hasActiveStripeEntitlement, isStripeCancellationScheduled, selectAuthoritativeActiveSubscription } from "@/lib/server/stripe-plan-mapping";
 
 export type SubscriptionPlan = "free" | "starter" | "pro" | "business";
 
@@ -18,6 +18,7 @@ export type SubscriptionState = {
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
   stripeSubscriptionId: string | null;
+  stripeCustomerId: string | null;
   stripePriceId: string | null;
   analysesUsed: number;
   analysesLimit: number | null;
@@ -43,12 +44,11 @@ export async function getCurrentSubscriptionState(): Promise<SubscriptionState |
   if (profile?.stripe_customer_id) {
     try {
       const subscriptions = (await getStripe().subscriptions.list({ customer: profile.stripe_customer_id, status: "all", limit: 100 })).data;
-      const activeSubscription = subscriptions
-        .filter((subscription) => subscription.status === "active" || subscription.status === "trialing")
-        .sort((left, right) => right.created - left.created)[0];
+      console.info("[subscription-presentation-debug] Stripe subscriptions queried", { customerId: profile.stripe_customer_id, subscriptions: subscriptions.map((subscription) => ({ subscriptionId: subscription.id, status: subscription.status, cancelAtPeriodEnd: subscription.cancel_at_period_end, cancelAt: subscription.cancel_at, canceledAt: subscription.canceled_at, currentPeriodEnd: subscription.items.data[0]?.current_period_end ?? null, priceId: subscription.items.data[0]?.price.id ?? null, customerId: typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id })) });
+      const activeSubscription = selectAuthoritativeActiveSubscription(subscriptions);
       if (activeSubscription) {
         authoritativeSubscription = activeSubscription;
-        console.info("[subscription-presentation-debug]", { subscriptionId: activeSubscription.id, status: activeSubscription.status, cancelAtPeriodEnd: activeSubscription.cancel_at_period_end, currentPeriodEnd: activeSubscription.items.data[0]?.current_period_end ? new Date(activeSubscription.items.data[0].current_period_end * 1000).toISOString() : null, plan: resolvePlanFromStripePriceId(activeSubscription.items.data[0]?.price.id ?? null) });
+        console.info("[subscription-presentation-debug] Stripe subscription authoritative", { subscriptionId: activeSubscription.id, status: activeSubscription.status, cancelAtPeriodEnd: activeSubscription.cancel_at_period_end, cancelAt: activeSubscription.cancel_at, canceledAt: activeSubscription.canceled_at, currentPeriodEnd: activeSubscription.items.data[0]?.current_period_end ? new Date(activeSubscription.items.data[0].current_period_end * 1000).toISOString() : null, priceId: activeSubscription.items.data[0]?.price.id ?? null, customerId: typeof activeSubscription.customer === "string" ? activeSubscription.customer : activeSubscription.customer.id, plan: resolvePlanFromStripePriceId(activeSubscription.items.data[0]?.price.id ?? null) });
         await syncStripeSubscription(activeSubscription, { verifiedUserId: user.id });
       } else {
         const endedSubscription = profile.stripe_subscription_id
@@ -56,7 +56,7 @@ export async function getCurrentSubscriptionState(): Promise<SubscriptionState |
           : subscriptions.sort((left, right) => right.created - left.created)[0];
         if (endedSubscription) {
           authoritativeSubscription = endedSubscription;
-          console.info("[subscription-presentation-debug]", { subscriptionId: endedSubscription.id, status: endedSubscription.status, cancelAtPeriodEnd: endedSubscription.cancel_at_period_end, currentPeriodEnd: endedSubscription.items.data[0]?.current_period_end ? new Date(endedSubscription.items.data[0].current_period_end * 1000).toISOString() : null, plan: resolvePlanFromStripePriceId(endedSubscription.items.data[0]?.price.id ?? null) });
+          console.info("[subscription-presentation-debug] Stripe subscription authoritative", { subscriptionId: endedSubscription.id, status: endedSubscription.status, cancelAtPeriodEnd: endedSubscription.cancel_at_period_end, cancelAt: endedSubscription.cancel_at, canceledAt: endedSubscription.canceled_at, currentPeriodEnd: endedSubscription.items.data[0]?.current_period_end ? new Date(endedSubscription.items.data[0].current_period_end * 1000).toISOString() : null, priceId: endedSubscription.items.data[0]?.price.id ?? null, customerId: typeof endedSubscription.customer === "string" ? endedSubscription.customer : endedSubscription.customer.id, plan: resolvePlanFromStripePriceId(endedSubscription.items.data[0]?.price.id ?? null) });
           await syncStripeSubscription(endedSubscription, { verifiedUserId: user.id });
         }
         else await revokeStripeEntitlementForMissingSubscription(user.id, profile.stripe_customer_id);
@@ -94,8 +94,10 @@ export async function getCurrentSubscriptionState(): Promise<SubscriptionState |
 
   const analysesLimit = plan === "free" ? 3 : plan === "starter" ? 10 : null;
   const analysesRemaining = analysesLimit === null ? null : Math.max(0, analysesLimit - analysesUsed);
-  const state = { userId: user.id, plan, status, isActive: plan !== "free", currentPeriodStart: periodStart, currentPeriodEnd: periodEnd, cancelAtPeriodEnd: authoritativeSubscription?.cancel_at_period_end ?? Boolean(reconciledProfile?.stripe_cancel_at_period_end), stripeSubscriptionId: authoritativeSubscription?.id ?? reconciledProfile?.stripe_subscription_id ?? null, stripePriceId, analysesUsed, analysesLimit, analysesRemaining, totalAnalyses: totalAnalyses ?? 0 };
-  console.info("[subscription-presentation-debug]", { subscriptionId: state.stripeSubscriptionId, status: state.status, cancelAtPeriodEnd: state.cancelAtPeriodEnd, currentPeriodEnd: state.currentPeriodEnd, plan: state.plan });
+  const stripeCustomerId = authoritativeSubscription ? (typeof authoritativeSubscription.customer === "string" ? authoritativeSubscription.customer : authoritativeSubscription.customer.id) : reconciledProfile?.stripe_customer_id ?? null;
+  const cancelAtPeriodEnd = authoritativeSubscription ? isStripeCancellationScheduled({ status: authoritativeSubscription.status, cancelAtPeriodEnd: authoritativeSubscription.cancel_at_period_end, cancelAt: authoritativeSubscription.cancel_at }) : Boolean(reconciledProfile?.stripe_cancel_at_period_end);
+  const state = { userId: user.id, plan, status, isActive: plan !== "free", currentPeriodStart: periodStart, currentPeriodEnd: periodEnd, cancelAtPeriodEnd, stripeSubscriptionId: authoritativeSubscription?.id ?? reconciledProfile?.stripe_subscription_id ?? null, stripeCustomerId, stripePriceId, analysesUsed, analysesLimit, analysesRemaining, totalAnalyses: totalAnalyses ?? 0 };
+  console.info("[subscription-presentation-debug] Final SubscriptionState", { subscriptionId: state.stripeSubscriptionId, stripeCustomerId: state.stripeCustomerId, status: state.status, cancelAtPeriodEnd: state.cancelAtPeriodEnd, currentPeriodEnd: state.currentPeriodEnd, plan: state.plan });
   console.info("[subscription-state] profile loaded", { authenticatedUserId: state.userId, profilePlan: reconciledProfile?.plan ?? null, stripeDerivedPlan, subscriptionStatus: status, stripePriceId: state.stripePriceId, currentPeriodStart: periodStart, currentPeriodEnd: periodEnd, normalizedPlan: state.plan, stripeVerificationFailed });
   return state;
 }

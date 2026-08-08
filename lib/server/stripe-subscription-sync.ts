@@ -3,7 +3,7 @@ import "server-only";
 import Stripe from "stripe";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { resolvePlanFromStripePriceId, type PlanId } from "@/lib/server/plans";
-import { shouldIgnoreStaleInactiveSubscription } from "@/lib/server/stripe-plan-mapping";
+import { isStripeCancellationScheduled, shouldIgnoreStaleInactiveSubscription } from "@/lib/server/stripe-plan-mapping";
 
 type SyncOptions = {
   clientReferenceId?: string | null;
@@ -29,6 +29,7 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
   const periodStart = item?.current_period_start ? new Date(item.current_period_start * 1000).toISOString() : null;
   const periodEnd = item?.current_period_end ? new Date(item.current_period_end * 1000).toISOString() : null;
   const isStripeActive = subscription.status === "active" || subscription.status === "trialing";
+  const cancellationScheduled = isStripeCancellationScheduled({ status: subscription.status, cancelAtPeriodEnd: subscription.cancel_at_period_end, cancelAt: subscription.cancel_at });
   const stripePlan = resolvePlanFromStripePriceId(priceId);
   let plan: PlanId | "free";
   if (isStripeActive) {
@@ -76,7 +77,7 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
 
   console.info("[billing-sync] stripe subscription authoritative", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null, stripeDerivedPlan: plan });
   if (existingProfile?.plan !== plan) console.info("[billing-sync] correcting Supabase plan", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null, stripeDerivedPlan: plan });
-  if (isStripeActive && subscription.cancel_at_period_end) console.info("[billing-sync] cancellation scheduled", { userId, subscriptionId: subscription.id, priceId, currentPeriodEnd: periodEnd });
+  if (cancellationScheduled) console.info("[billing-sync] cancellation scheduled", { userId, subscriptionId: subscription.id, priceId, currentPeriodEnd: periodEnd, cancelAtPeriodEnd: subscription.cancel_at_period_end, cancelAt: subscription.cancel_at });
   if (!isStripeActive && existingProfile?.plan !== "free") console.info("[billing-sync] entitlement revoked", { userId, subscriptionId: subscription.id, priceId, oldSupabasePlan: existingProfile?.plan ?? null });
 
   const { data: updatedProfile, error: updateError } = await admin
@@ -89,7 +90,7 @@ export async function syncStripeSubscription(subscription: Stripe.Subscription, 
       plan,
       stripe_current_period_start: periodStart,
       stripe_current_period_end: periodEnd,
-      stripe_cancel_at_period_end: subscription.cancel_at_period_end,
+      stripe_cancel_at_period_end: cancellationScheduled,
     })
     .eq("id", userId)
     .select("id")

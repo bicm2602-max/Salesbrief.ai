@@ -21,6 +21,7 @@ const reconciledProCancellationState = {
   currentPeriodEnd: periodEnd,
   cancelAtPeriodEnd: true,
   stripeSubscriptionId: "sub_123",
+  stripeCustomerId: "cus_123",
   stripePriceId: "price_pro",
   analysesUsed: 0,
   analysesLimit: null,

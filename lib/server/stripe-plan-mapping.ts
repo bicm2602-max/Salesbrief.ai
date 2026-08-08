@@ -23,6 +23,28 @@ export function hasActiveStripeEntitlement(status: string | null, currentPeriodE
   return (status === "active" || status === "trialing") && Boolean(currentPeriodEnd) && new Date(currentPeriodEnd!).getTime() > now;
 }
 
+export function isStripeCancellationScheduled(input: { status: string; cancelAtPeriodEnd: boolean; cancelAt: number | null; now?: number }) {
+  const isActive = input.status === "active" || input.status === "trialing";
+  const cancelAtIsFuture = input.cancelAt !== null && input.cancelAt * 1000 > (input.now ?? Date.now());
+  return isActive && (input.cancelAtPeriodEnd || cancelAtIsFuture);
+}
+
+type ActiveStripeSubscription = {
+  status: string;
+  created: number;
+};
+
+/**
+ * Stripe can retain historical subscriptions for a customer. Entitlements must
+ * always be based on the most recently created active or trialing subscription,
+ * never a stale canceled record or an arbitrary list position.
+ */
+export function selectAuthoritativeActiveSubscription<T extends ActiveStripeSubscription>(subscriptions: T[]): T | null {
+  return subscriptions
+    .filter((subscription) => subscription.status === "active" || subscription.status === "trialing")
+    .sort((left, right) => right.created - left.created)[0] ?? null;
+}
+
 export function resolveStripePlanPriceIds(priceIds: StripePlanPriceIds): StripePlanPriceIds {
   const entries = Object.entries(priceIds) as Array<[keyof StripePlanPriceIds, string]>;
   for (const [plan, priceId] of entries) {

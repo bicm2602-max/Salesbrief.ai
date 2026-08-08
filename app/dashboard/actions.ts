@@ -24,7 +24,7 @@ export async function getSubscriptionDisplay() {
   const state = await getCurrentSubscriptionState();
   if (!state) return { success: false, plan: "free", displayName: "Free plan", detail: "3 total free analyses", remaining: null, canManage: false, schedule: null } as const;
   const plan = state.plan;
-  console.info("[subscription-presentation-debug]", { subscriptionId: state.stripeSubscriptionId, status: state.status, cancelAtPeriodEnd: state.cancelAtPeriodEnd, currentPeriodEnd: state.currentPeriodEnd, plan: state.plan });
+  console.info("[subscription-presentation-debug] Sidebar presentation input", { subscriptionId: state.stripeSubscriptionId, stripeCustomerId: state.stripeCustomerId, status: state.status, cancelAtPeriodEnd: state.cancelAtPeriodEnd, currentPeriodEnd: state.currentPeriodEnd, plan: state.plan });
   const detail = plan === "starter" ? "10 analyses per billing period" : plan === "pro" ? "Unlimited analyses" : plan === "business" ? "Active subscription" : "3 total free analyses";
   const schedule = getSubscriptionDatePresentation(state)?.planDate ?? null;
   return { success: true, plan, displayName: `${plan.charAt(0).toUpperCase()}${plan.slice(1)} plan`, detail, remaining: plan === "starter" ? state.analysesRemaining : null, canManage: plan !== "free", schedule } as const;
