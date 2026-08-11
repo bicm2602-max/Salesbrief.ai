@@ -54,6 +54,20 @@ export interface OutreachVariants {
   linkedinConversational: string;
 }
 
+export interface ActionLayer {
+  priority: "HIGH" | "MEDIUM" | "LOW";
+  priorityReason: string;
+  whyNow: { statement: string; evidenceLevel: "strong" | "moderate" | "hypothesis" };
+  whoToContact: {
+    primary: { role: string; reason: string };
+    secondary?: { role: string; reason: string };
+  };
+  painToLeadWith: { verifiedFact: string; hypothesis: string };
+  recommendedSalesAngle: string;
+  bestNextAction: string;
+  outreachStarter: { coldEmailOpening: string; linkedinOpening: string; coldCallOpener: string };
+}
+
 export interface AnalysisReport {
   companyName: string;
   industry: string;
@@ -81,6 +95,8 @@ export interface AnalysisReport {
   followUp: string;
   objections: string[];
   summary: string;
+  /** Present on analyses generated after Action Layer V1. */
+  actionLayer?: ActionLayer;
 }
 
 export interface AnalysisResult extends AnalysisReport {

@@ -58,6 +58,7 @@ export function buildAnalysisAssistantContext(jsonResult: unknown) {
     buyingSignals: textList(result.buyingSignals),
     recommendedOffer: text(result.recommendedOffer),
     summary: text(result.summary),
+    actionLayer: result.actionLayer && typeof result.actionLayer === "object" ? result.actionLayer : undefined,
   };
 
   return truncate(JSON.stringify(context), MAX_CONTEXT_CHARS);

@@ -17,6 +17,9 @@ test("outreach prompt enforces grounded, variant-based messaging", async () => {
 
   assert.match(prompt, /Never invent news, launches, hiring, metrics/i);
   assert.match(prompt, /emailShort, emailConsultative, linkedinShort, linkedinConversational/);
+  assert.match(prompt, /actionLayer/);
+  assert.match(prompt, /No strong timing signal identified/);
+  assert.match(prompt, /never fabricated people/i);
   assert.match(prompt, /80-110 words/);
   assert.match(prompt, /No prospect information was provided/);
 });

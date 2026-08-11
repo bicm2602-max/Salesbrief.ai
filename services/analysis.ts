@@ -12,6 +12,7 @@ import { calculateLeadScore } from "@/services/intelligence/lead-score";
 import { detectTechStack } from "@/services/intelligence/tech-stack";
 import { extractBuyingSignals } from "@/services/intelligence/buying-signals";
 import type { AnalysisReport, AnalysisResult } from "@/types/analysis";
+import { actionLayerSchema } from "@/services/action-layer";
 
 const objectionSchema = z.union([
   z.string(),
@@ -48,6 +49,7 @@ const analysisSchema = z.object({
     objections.map((objection) => typeof objection === "string" ? objection : objection.objection),
   ),
   summary: z.string().min(1),
+  actionLayer: actionLayerSchema,
 });
 
 const urlSchema = z.string().trim().url();

@@ -9,6 +9,7 @@ import { ScoreCard } from "@/components/analysis/score-card";
 import { SignalCard } from "@/components/analysis/signal-card";
 import { FavoriteButton } from "@/components/analysis/favorite-button";
 import { AskSalesBrief } from "@/components/analysis/ask-salesbrief";
+import { ActionLayerCard } from "@/components/analysis/action-layer-card";
 
 interface AnalysisResultsProps {
   result: AnalysisResult;
@@ -162,6 +163,8 @@ export function AnalysisResults({ result, analysisId, isFavorite }: AnalysisResu
           </div>
         </div>
       </div>
+
+      <ActionLayerCard actionLayer={result.actionLayer} />
 
       {analysisId ? <AskSalesBrief analysisId={analysisId} /> : null}
 
