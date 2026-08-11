@@ -10,7 +10,8 @@
     "test:prompts": "node --test tests/company-analysis-prompt.test.mjs tests/analysis-assistant.test.mjs tests/action-layer.test.mjs",
     "test:stripe-plans": "node --test tests/stripe-plan-mapping.test.mjs",
     "test:billing-ui": "node --test tests/subscription-presentation.test.mjs",
-    "test:quotas": "node --test tests/quota-enforcement.test.mjs"
+    "test:quotas": "node --test tests/quota-enforcement.test.mjs",
+    "test:auth": "node --test tests/auth-session.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
