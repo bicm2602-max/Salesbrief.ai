@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { AnalysisResults } from "@/components/analysis/analysis-results";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { AnalysisResult } from "@/types/analysis";
+import { parseAnalysisProvider } from "@/services/ai-providers";
 
 export default async function SavedAnalysisPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,7 +12,7 @@ export default async function SavedAnalysisPage({ params }: { params: Promise<{ 
 
   const { data: analysis, error } = await supabase
     .from("analyses")
-    .select("json_result, is_favorite")
+    .select("json_result, is_favorite, ai_provider")
     .eq("id", id)
     .eq("user_id", user.id)
     .eq("status", "completed")
@@ -24,5 +25,5 @@ export default async function SavedAnalysisPage({ params }: { params: Promise<{ 
     notFound();
   }
 
-  return <AnalysisResults result={analysis.json_result as unknown as AnalysisResult} analysisId={id} isFavorite={analysis.is_favorite} />;
+  return <AnalysisResults result={analysis.json_result as unknown as AnalysisResult} analysisId={id} isFavorite={analysis.is_favorite} provider={parseAnalysisProvider(analysis.ai_provider)} />;
 }

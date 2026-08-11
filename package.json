@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:prompts": "node --test tests/company-analysis-prompt.test.mjs tests/analysis-assistant.test.mjs tests/action-layer.test.mjs",
+    "test:prompts": "node --test tests/company-analysis-prompt.test.mjs tests/analysis-assistant.test.mjs tests/action-layer.test.mjs tests/ai-providers.test.mjs",
     "test:stripe-plans": "node --test tests/stripe-plan-mapping.test.mjs",
     "test:billing-ui": "node --test tests/subscription-presentation.test.mjs",
     "test:quotas": "node --test tests/quota-enforcement.test.mjs",

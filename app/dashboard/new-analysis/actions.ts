@@ -5,6 +5,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { generateSalesBrief, normalizeWebsite, validateAnalysisUrl } from "@/services/analysis";
 import { AnalysisPipelineError } from "@/services/analysis-errors";
 import { getCurrentSubscriptionState } from "@/lib/server/subscription-state";
+import { parseAnalysisProvider, type AnalysisProvider } from "@/services/ai-providers";
 
 type AnalysisSource = "new-analysis" | "rerun";
 
@@ -47,6 +48,7 @@ async function runAnalysis(
     originalAnalysisId?: string;
     duplicateProtectionEnabled: boolean;
   },
+  provider: AnalysisProvider,
 ) {
   let normalizedUrl = "";
   let reservedAnalysisId: string | null = null;
@@ -100,7 +102,7 @@ async function runAnalysis(
     // This is the final authority; the state check above only improves UX.
     const { data: reservation, error: reservationError } = await supabase
       .from("analyses")
-      .insert({ user_id: userId, website: normalizedUrl, json_result: {}, score: 0, status: "processing" })
+      .insert({ user_id: userId, website: normalizedUrl, json_result: {}, score: 0, status: "processing", ai_provider: provider })
       .select("id")
       .single();
     if (reservationError) {
@@ -116,7 +118,7 @@ async function runAnalysis(
       OPENAI_API_KEY_LENGTH: process.env.OPENAI_API_KEY?.length ?? 0,
     });
 
-    const result = await generateSalesBrief(normalizedUrl);
+    const result = await generateSalesBrief(normalizedUrl, provider);
     console.info("[analysis-action] analysis generation completed", { stage: "OpenAI response parsing", url: normalizedUrl });
     const payload = {
       json_result: result,
@@ -163,7 +165,7 @@ async function runAnalysis(
 
     console.info("[analysis-action] returning success", { stage: "final response", url: normalizedUrl });
     const serializableResult = JSON.parse(JSON.stringify(result)) as typeof result;
-    return { success: true, result: serializableResult, analysisId: savedAnalysis.id };
+    return { success: true, result: serializableResult, analysisId: savedAnalysis.id, provider };
   } catch (error) {
     if (reservedAnalysisId) {
       const supabase = await createServerSupabaseClient();
@@ -185,8 +187,10 @@ async function runAnalysis(
   }
 }
 
-export async function analyzeWebsiteAction(rawUrl: string) {
-  return runAnalysis(rawUrl, { source: "new-analysis", duplicateProtectionEnabled: true });
+export async function analyzeWebsiteAction(rawUrl: string, requestedProvider?: unknown) {
+  const provider = parseAnalysisProvider(requestedProvider);
+  if (!provider) return { success: false, error: "Choose a valid AI model." } as const;
+  return runAnalysis(rawUrl, { source: "new-analysis", duplicateProtectionEnabled: true }, provider);
 }
 
 export async function getRecentAnalysesForRerun() {
@@ -220,7 +224,7 @@ export async function rerunSavedAnalysisAction(analysisId: string) {
 
     const { data: analysis, error } = await supabase
       .from("analyses")
-      .select("website")
+      .select("website, ai_provider")
       .eq("id", analysisId)
       .eq("user_id", user.id)
       .eq("status", "completed")
@@ -236,11 +240,12 @@ export async function rerunSavedAnalysisAction(analysisId: string) {
       website: analysis.website,
       duplicateProtectionEnabled: false,
     });
+    const provider = parseAnalysisProvider(analysis.ai_provider) ?? "openai";
     return runAnalysis(analysis.website, {
       source: "rerun",
       originalAnalysisId: analysisId,
       duplicateProtectionEnabled: false,
-    });
+    }, provider);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to re-run this analysis.";
     console.error("[analysis-action] re-run failed", { stage: "re-run", message });

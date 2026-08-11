@@ -2,7 +2,7 @@ import { z } from "zod";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { buildCompanyAnalysisPrompt } from "@/services/prompts/company-analysis";
-import { generateAnalysisJson } from "@/services/openai";
+import { generateStructuredAnalysis, type AnalysisProvider } from "@/services/ai-providers";
 import { AnalysisPipelineError } from "@/services/analysis-errors";
 import { fetchWebsiteContent } from "@/services/website";
 import { buildMeetingPlan } from "@/services/intelligence/meeting-plan";
@@ -237,7 +237,7 @@ function deriveFallbackReport(website: string, content: WebsiteContent): Analysi
   return enrichAnalysisReport(baseReport, content);
 }
 
-export async function generateSalesBrief(website: string): Promise<AnalysisResult> {
+export async function generateSalesBrief(website: string, provider: AnalysisProvider = "openai"): Promise<AnalysisResult> {
   const normalizedWebsite = normalizeWebsite(website);
   console.info("[analysis] website fetch started", { stage: "website fetch", url: normalizedWebsite });
   const siteContent = await fetchWebsiteContent(normalizedWebsite);
@@ -248,16 +248,23 @@ export async function generateSalesBrief(website: string): Promise<AnalysisResul
     paragraphCount: siteContent.paragraphs.length,
     textLength: siteContent.homePage.length,
   });
-  const analysisPayload = await generateAnalysisJson(buildCompanyAnalysisPrompt(serializePromptWebsiteContent(siteContent)));
+  const prompt = buildCompanyAnalysisPrompt(serializePromptWebsiteContent(siteContent));
+  let analysisPayload = await generateStructuredAnalysis(provider, prompt);
 
   try {
-    const parsed = JSON.parse(analysisPayload);
+    let parsed = JSON.parse(analysisPayload);
     console.info("[analysis] OpenAI response parsing completed", { stage: "openai response parsing" });
     console.info("[analysis] objections before validation", {
       stage: "Zod/schema validation",
       objections: parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).objections : undefined,
     });
-    const validation = analysisSchema.safeParse(parsed);
+    let validation = analysisSchema.safeParse(parsed);
+    if (!validation.success) {
+      console.warn("[analysis] provider schema repair requested", { provider, issueCount: validation.error.issues.length });
+      analysisPayload = await generateStructuredAnalysis(provider, `${prompt}\nYour previous response did not match the required schema. Return the complete strict JSON object only; do not omit any field.`);
+      parsed = JSON.parse(analysisPayload);
+      validation = analysisSchema.safeParse(parsed);
+    }
     if (!validation.success) {
       console.error("[analysis] schema validation failed", {
         stage: "Zod/schema validation",

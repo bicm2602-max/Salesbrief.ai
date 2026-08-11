@@ -11,6 +11,7 @@ import { LoadingAnalysis } from "@/components/analysis/loading-analysis";
 import { AnalysisResults } from "@/components/analysis/analysis-results";
 import { QuotaUpgradePanel } from "@/components/billing/quota-upgrade-panel";
 import { z } from "zod";
+import type { AnalysisProvider } from "@/services/ai-providers";
 
 const examples = ["https://stripe.com", "https://notion.so", "https://linear.app"];
 const inputSchema = z.string().trim().url().refine((value) => {
@@ -30,6 +31,7 @@ export default function NewAnalysisPage() {
   const [recentError, setRecentError] = React.useState<string | null>(null);
   const [quotaState, setQuotaState] = React.useState<AnalysisQuotaState | null>(null);
   const [quotaLoaded, setQuotaLoaded] = React.useState(false);
+  const [provider, setProvider] = React.useState<AnalysisProvider>("openai");
 
   React.useEffect(() => {
     void getRecentAnalysesForRerun().then((response) => {
@@ -57,7 +59,7 @@ export default function NewAnalysisPage() {
     setIsLoading(true);
     setError(null);
 
-    const response = await analyzeWebsiteAction(parsed.data);
+    const response = await analyzeWebsiteAction(parsed.data, provider);
     if (response.success && response.result) {
       setResult(response.result);
       setAnalysisId(response.analysisId);
@@ -118,6 +120,7 @@ export default function NewAnalysisPage() {
                 placeholder="https://company.com"
               />
             </label>
+            <fieldset className="mt-5"><legend className="text-sm font-medium text-slate-200">AI Model</legend><div className="mt-3 grid gap-2 sm:grid-cols-3">{([{ id: "openai", name: "OpenAI", detail: "Recommended" }, { id: "deepseek", name: "DeepSeek", detail: "Fast & efficient" }, { id: "kimi", name: "Kimi", detail: "Deep research" }] as const).map((item) => <button key={item.id} type="button" onClick={() => setProvider(item.id)} aria-pressed={provider === item.id} className={`rounded-2xl border px-4 py-3 text-left transition ${provider === item.id ? "border-blue-400/60 bg-blue-500/15 text-slate-50" : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"}`}><span className="block text-sm font-medium">{item.name}</span><span className="mt-1 block text-xs text-slate-400">{item.detail}</span></button>)}</div></fieldset>
             {error ? <p className="mt-4 text-sm text-rose-300" role="alert">{error}</p> : null}
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap gap-2">
@@ -156,7 +159,7 @@ export default function NewAnalysisPage() {
           </div>
         </section>
       ) : (
-        <AnalysisResults result={result} analysisId={analysisId ?? undefined} />
+        <AnalysisResults result={result} analysisId={analysisId ?? undefined} provider={provider} />
       )}
     </div>
   );

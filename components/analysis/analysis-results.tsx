@@ -10,14 +10,16 @@ import { SignalCard } from "@/components/analysis/signal-card";
 import { FavoriteButton } from "@/components/analysis/favorite-button";
 import { AskSalesBrief } from "@/components/analysis/ask-salesbrief";
 import { ActionLayerCard } from "@/components/analysis/action-layer-card";
+import type { AnalysisProvider } from "@/services/ai-providers";
 
 interface AnalysisResultsProps {
   result: AnalysisResult;
   analysisId?: string;
   isFavorite?: boolean;
+  provider?: AnalysisProvider | null;
 }
 
-export function AnalysisResults({ result, analysisId, isFavorite }: AnalysisResultsProps) {
+export function AnalysisResults({ result, analysisId, isFavorite, provider }: AnalysisResultsProps) {
   const [copied, setCopied] = React.useState<string | null>(null);
 
   const copyValue = (value: string, label: string) => {
@@ -35,6 +37,7 @@ export function AnalysisResults({ result, analysisId, isFavorite }: AnalysisResu
               <Sparkles className="size-4" />
               Sales intelligence report ready
             </div>
+            {provider ? <p className="mt-3 text-xs text-slate-500">Generated with {provider === "openai" ? "OpenAI" : provider === "deepseek" ? "DeepSeek" : "Kimi"}</p> : null}
             <h2 className="mt-4 text-3xl font-semibold tracking-tight text-slate-50">{result.companyName}</h2>
             <p className="mt-3 max-w-2xl text-base leading-8 text-slate-400">{result.description}</p>
           </div>
